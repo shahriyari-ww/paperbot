@@ -14,7 +14,7 @@ from search_service import search_open_access
 # ======================================================
 TEMP_CACHE = {}
 
-# الگوی تشخیص DOI از متن
+# الگوی تشخیص DOI از متن (پشتیبانی از URL کامل و DOI خالص)
 DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 
 # ======================================================
@@ -81,6 +81,9 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # پردازش اصلی پیام‌ها
 # ======================================================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ============================================================
+    # 1. اعتبارسنجی ورودی
+    # ============================================================
     # بررسی وجود پیام متنی
     if not update.message or not update.message.text:
         if update.message:
@@ -89,25 +92,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text.strip()
     
-    # استخراج DOI از متن (اگر وجود داشته باشد)
+    # اگر پیام خالی بود
+    if not text:
+        await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن.")
+        return
+    
+    # ============================================================
+    # 2. استخراج هوشمند query از ورودی کاربر
+    # ============================================================
+    # ابتدا بررسی کن که آیا کاربر یک DOI کامل (با URL) فرستاده یا خالص
     doi_match = DOI_PATTERN.search(text)
     
     if doi_match:
         # اگر DOI پیدا شد، از آن استفاده کن
         query = doi_match.group(0)
-        # ذخیره متن کامل برای استفاده در عنوان
-        full_text = text
+        print(f"🔍 Extracted DOI: {query}")
     else:
-        # در غیر این صورت از کل متن به عنوان عنوان استفاده کن
+        # در غیر این صورت از کل متن به عنوان query استفاده کن
         query = text
-        full_text = text
-    
-    if not query:
-        await update.message.reply_text("❌ لطفاً یک DOI یا عنوان مقاله معتبر ارسال کن.")
-        return
+        print(f"🔍 Using text as query: {query[:100]}...")
     
     # ============================================================
-    # 1. Check cache (Supabase)
+    # 3. Check cache (Supabase)
     # ============================================================
     cached = get_cached(query)
     if cached:
@@ -119,7 +125,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # ============================================================
-    # 2. Check temp cache (اگر Supabase کار نمی‌کند)
+    # 4. Check temp cache (اگر Supabase کار نمی‌کند)
     # ============================================================
     if query in TEMP_CACHE:
         await context.bot.send_document(
@@ -130,7 +136,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # ============================================================
-    # 3. Search (با اولویت‌بندی جدید)
+    # 5. Search (با اولویت‌بندی جدید)
     # ============================================================
     await update.message.reply_text("🔎 جستجو در منابع Open Access...")
     result = search_open_access(query)
@@ -140,7 +146,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # ============================================================
-        # دانلود PDF با هدرهای مناسب
+        # 6. دانلود PDF با هدرهای مناسب
         # ============================================================
         await update.message.reply_text("📥 در حال دانلود PDF...")
         
@@ -159,7 +165,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # ============================================================
-        # بررسی اینکه آیا محتوا واقعاً PDF است
+        # 7. بررسی اینکه آیا محتوا واقعاً PDF است
         # ============================================================
         content_type = pdf_resp.headers.get('content-type', '').lower()
         content_length = len(pdf_resp.content)
@@ -190,7 +196,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # ============================================================
-        # ساخت کپشن با هشتگ ناشر
+        # 8. ساخت کپشن با هشتگ ناشر
         # ============================================================
         title = result["title"]
         doi = query if query.startswith("10.") else result.get("doi", "")
@@ -210,7 +216,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = f"{title}\n\n{doi} (https://doi.org/{doi})"
         
         # ============================================================
-        # ذخیره در کانال و کش
+        # 9. ذخیره در کانال و کش
         # ============================================================
         await update.message.reply_text("📤 در حال ذخیره در کانال...")
         
@@ -230,13 +236,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(temp_path)
         
         # ============================================================
-        # ذخیره در Supabase و کش موقت
+        # 10. ذخیره در Supabase و کش موقت
         # ============================================================
         save_paper(query=query, title=title, file_id=file_id, source=result["source"])
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
         
         # ============================================================
-        # ارسال به کاربر
+        # 11. ارسال به کاربر
         # ============================================================
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
