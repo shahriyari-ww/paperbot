@@ -16,8 +16,8 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # لیست کانال‌های جستجو
 SEARCH_CHANNELS = [
-    "Archive_article",
-    "nexus_aaron",
+    "Archive_article",    # ← با زیرخط
+    "nexus_aaron",        # ← با زیرخط
     "scihubot",
     "sks7777777nexusbot",
 ]
