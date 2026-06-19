@@ -457,11 +457,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown"
     )
     
-   # try:
-       # channel_result = await search_in_channels(query, context.bot, context)
-        #if channel_result:
-         #   print(f"✅ Found in Telegram channels")
-          #  CACHE_STATS["channel_hits"] += 1
+    channel_result = None
+    try:
+        channel_result = await search_in_channels(query, context.bot, context)
+        if channel_result:
+            print(f"✅ Found in Telegram channels")
+            CACHE_STATS["channel_hits"] += 1
             
             # اگر file_id موجود باشد، مستقیماً ارسال کن
             if channel_result.get("file_id"):
@@ -485,31 +486,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             
             # اگر file_id نبود اما pdf_url داشت، دانلود کن
             if channel_result.get("pdf_url"):
-                # ادامه با دانلود PDF
                 result = channel_result
             else:
                 await update.message.reply_text("❌ مقاله در کانال پیدا شد اما قابل دانلود نیست.")
                 return
         else:
-            # ============================================================
-            # 6. جستجو در منابع Open Access (اگر در کانال پیدا نشد)
-            # ============================================================
-            await update.message.reply_text(
-                "🔎 **جستجو در منابع Open Access...**\n"
-                "⏳ این عمل ممکن است ۱۰-۲۰ ثانیه طول بکشد.\n\n"
-                "📚 منابع جستجو:\n"
-                "• Crossref (اطلاعات کامل)\n"
-                "• Unpaywall (PDF قانونی)\n"
-                "• Sci-Hub (PDF جایگزین)\n"
-                "• و ۷ منبع دیگر",
-                parse_mode="Markdown"
-            )
-            
-            result = await asyncio.to_thread(search_open_access, query)
+            raise Exception("No result from channel search")
             
     except Exception as e:
-        print(f"❌ Search error: {e}")
-        result = None
+        print(f"⚠️ Channel search failed or no result: {e}")
+        # ============================================================
+        # 6. جستجو در منابع Open Access (اگر در کانال پیدا نشد)
+        # ============================================================
+        await update.message.reply_text(
+            "🔎 **جستجو در منابع Open Access...**\n"
+            "⏳ این عمل ممکن است ۱۰-۲۰ ثانیه طول بکشد.\n\n"
+            "📚 منابع جستجو:\n"
+            "• Crossref (اطلاعات کامل)\n"
+            "• Unpaywall (PDF قانونی)\n"
+            "• Sci-Hub (PDF جایگزین)\n"
+            "• و ۷ منبع دیگر",
+            parse_mode="Markdown"
+        )
+        
+        try:
+            result = await asyncio.to_thread(search_open_access, query)
+        except Exception as e:
+            print(f"❌ Search error: {e}")
+            result = None
     
     if not result:
         await update.message.reply_text(
