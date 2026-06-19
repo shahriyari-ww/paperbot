@@ -3,7 +3,7 @@ import requests
 
 def search_crossref(query: str):
     """
-    جستجوی DOI در Crossref برای یافتن نسخه Open Access و اطلاعات کامل مقاله
+    جستجوی DOI در Crossref برای دریافت اطلاعات کامل مقاله
     """
     try:
         if not query.startswith("10."):
@@ -59,8 +59,14 @@ def search_crossref(query: str):
                     pdf_url = link.get("url")
                     break
         
+        # اگر PDF پیدا نشد، از Sci-Hub استفاده کن
         if not pdf_url:
-            print("❌ No PDF URL found in Crossref response")
+            scihub_result = search_scihub(query)
+            if scihub_result:
+                pdf_url = scihub_result.get("pdf_url")
+        
+        if not pdf_url:
+            print("❌ No PDF URL found")
             return None
         
         return {
@@ -75,4 +81,25 @@ def search_crossref(query: str):
         
     except Exception as e:
         print(f"❌ Crossref search error: {e}")
+        return None
+
+def search_scihub(query: str):
+    """تابع کمکی برای جستجو در Sci-Hub"""
+    try:
+        mirrors = [
+            "https://sci-hub.se",
+            "https://sci-hub.st",
+            "https://sci-hub.ru"
+        ]
+        
+        for mirror in mirrors:
+            try:
+                url = f"{mirror}/{query}"
+                resp = requests.get(url, timeout=30)
+                if resp.status_code == 200:
+                    return {"pdf_url": url}
+            except:
+                continue
+        return None
+    except:
         return None
