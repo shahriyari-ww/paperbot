@@ -1,6 +1,7 @@
 # search_service.py
 from providers.arxiv_provider import search_arxiv
 from providers.pubmed_provider import search_pubmed, search_pubmed_advanced
+from providers.crossref_provider import search_crossref
 
 def search_open_access(query: str):
     """
@@ -14,6 +15,7 @@ def search_open_access(query: str):
     """
     # لیست ارائه‌دهندگان با ترتیب اولویت
     providers = [
+        ("Crossref", search_crossref),
         ("arXiv", search_arxiv),
         ("PubMed", search_pubmed),
         ("PubMed Advanced", search_pubmed_advanced)
