@@ -1,49 +1,61 @@
-import requests
-import xml.etree.ElementTree as ET
+# providers/base_provider.py
+import asyncio
+from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any
+from utils.retry import retry, RetryError
+from utils.rate_limiter import global_rate_limiter
 
-def search_base(query: str):
+class BaseProvider(ABC):
     """
-    جستجو در BASE (Bielefeld Academic Search Engine)
+    کلاس پایه برای همه ارائه‌دهندگان مقالات
     """
-    try:
-        url = f"https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi?func=PerformSearch&query={query}&format=xml"
-        resp = requests.get(url, timeout=30)
-        
-        if resp.status_code != 200:
-            return None
-        
-        root = ET.fromstring(resp.text)
-        
-        # پیدا کردن اولین نتیجه
-        hit = root.find(".//hit")
-        if hit is None:
-            return None
-        
-        title_elem = hit.find(".//title")
-        title = title_elem.text if title_elem is not None else "Unknown Title"
-        
-        # پیدا کردن لینک PDF
-        pdf_url = None
-        for elem in hit.findall(".//url"):
-            if elem.text and elem.text.endswith(".pdf"):
-                pdf_url = elem.text
-                break
-        
-        if not pdf_url:
-            # اگر PDF پیدا نشد، از لینک اصلی استفاده کن
-            url_elem = hit.find(".//url")
-            if url_elem is not None:
-                pdf_url = url_elem.text
-        
-        if not pdf_url:
-            return None
-        
-        return {
-            "title": title,
-            "pdf_url": pdf_url,
-            "source": "base"
+    name: str = "base"
+    timeout: int = 30
+    max_retries: int = 3
+    
+    def __init__(self):
+        self._stats = {
+            "success": 0,
+            "failure": 0,
+            "total_time": 0.0,
         }
+    
+    @abstractmethod
+    async def search(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        جستجو در منبع و بازگرداندن اطلاعات مقاله
+        """
+        pass
+    
+    @retry(max_attempts=3, delay=1.0, backoff=2.0, max_delay=10.0)
+    async def search_with_retry(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        جستجو با قابلیت تلاش مجدد
+        """
+        # اعمال محدودیت نرخ
+        await global_rate_limiter.acquire(self.name)
         
-    except Exception as e:
-        print(f"BASE search error: {e}")
-        return None
+        # اجرای جستجو با ثبت زمان
+        start_time = asyncio.get_event_loop().time()
+        try:
+            result = await self.search(query)
+            self._stats["success"] += 1
+            return result
+        except Exception as e:
+            self._stats["failure"] += 1
+            raise
+        finally:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            self._stats["total_time"] += elapsed
+            print(f"⏱️ {self.name} search took {elapsed:.2f}s (Success: {self._stats['success']}, Failure: {self._stats['failure']})")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """دریافت آمار عملکرد ارائه‌دهنده"""
+        total = self._stats["success"] + self._stats["failure"]
+        return {
+            "name": self.name,
+            "success": self._stats["success"],
+            "failure": self._stats["failure"],
+            "success_rate": self._stats["success"] / total if total > 0 else 0,
+            "avg_time": self._stats["total_time"] / total if total > 0 else 0,
+        }
