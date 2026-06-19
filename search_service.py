@@ -11,11 +11,12 @@ from providers.scihub_provider import search_scihub
 
 def search_open_access(query: str):
     """
-    جستجو در منابع مختلف Open Access
+    جستجو در منابع مختلف Open Access با اولویت‌بندی جدید
     """
+    # لیست ارائه‌دهندگان با اولویت جدید
     providers = [
-        ("Crossref", search_crossref),  # اولویت اول برای دریافت متادیتا
-        ("Sci-Hub", search_scihub),      # برای دریافت PDF
+        ("Crossref", search_crossref),      # اولویت اول برای دریافت متادیتا
+        ("Sci-Hub", search_scihub),          # برای دریافت PDF
         ("PubMed", search_pubmed),
         ("PubMed Advanced", search_pubmed_advanced),
         ("Unpaywall", search_unpaywall),
@@ -37,4 +38,5 @@ def search_open_access(query: str):
             print(f"⚠️ Error in {provider_name}: {e}")
             continue
     
+    print(f"❌ No results found for: {query}")
     return None
