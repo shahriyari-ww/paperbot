@@ -2,6 +2,11 @@
 from providers.arxiv_provider import search_arxiv
 from providers.pubmed_provider import search_pubmed, search_pubmed_advanced
 from providers.crossref_provider import search_crossref
+from providers.unpaywall_provider import search_unpaywall
+from providers.core_provider import search_core
+from providers.base_provider import search_base
+from providers.semantic_scholar_provider import search_semantic_scholar
+from providers.doaj_provider import search_doaj
 
 def search_open_access(query: str):
     """
@@ -15,10 +20,15 @@ def search_open_access(query: str):
     """
     # لیست ارائه‌دهندگان با ترتیب اولویت
     providers = [
-        ("Crossref", search_crossref),
-        ("arXiv", search_arxiv),
-        ("PubMed", search_pubmed),
-        ("PubMed Advanced", search_pubmed_advanced)
+        ("Crossref", search_crossref),              # برای DOI ها
+        ("Unpaywall", search_unpaywall),            # برای پیدا کردن نسخه رایگان
+        ("Semantic Scholar", search_semantic_scholar),  # برای مقالات علمی
+        ("arXiv", search_arxiv),                    # برای مقالات arXiv
+        ("PubMed", search_pubmed),                  # برای PubMed
+        ("PubMed Advanced", search_pubmed_advanced), # برای PMC
+        ("CORE", search_core),                      # موتور جستجوی Open Access
+        ("BASE", search_base),                      # موتور جستجوی علمی
+        ("DOAJ", search_doaj)                       # دایرکتوری مجلات دسترسی آزاد
     ]
     
     for provider_name, search_func in providers:
