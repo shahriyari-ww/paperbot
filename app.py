@@ -1,7 +1,6 @@
 # app.py
 import os
 import re
-import sys
 import tempfile
 import requests
 from datetime import datetime
@@ -12,11 +11,11 @@ from db import get_cached, save_paper
 from search_service import search_open_access
 
 # ======================================================
-# کش موقت در حافظه (برای مواقعی که Supabase کار نمی‌کند)
+# کش موقت در حافظه
 # ======================================================
 TEMP_CACHE = {}
 
-# الگوی تشخیص DOI از متن (پشتیبانی از URL کامل و DOI خالص)
+# الگوی تشخیص DOI
 DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 
 # ======================================================
@@ -24,7 +23,6 @@ DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 # ======================================================
 
 def get_main_keyboard():
-    """کیبورد اصلی با دکمه‌های تعاملی"""
     keyboard = [
         [
             InlineKeyboardButton("📚 راهنما", callback_data="help"),
@@ -41,17 +39,15 @@ def get_main_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 def get_help_keyboard():
-    """کیبورد بازگشت به منوی اصلی"""
     keyboard = [
         [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 # ======================================================
-# دستور START با دکمه‌ها و توضیحات
+# دستور START
 # ======================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """دستور شروع با دکمه‌های تعاملی"""
     welcome_text = (
         "سلام 👋\n\n"
         "به ربات دانلود مقاله خوش آمدید!\n\n"
@@ -74,10 +70,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ======================================================
-# پردازش دکمه‌ها (Callback Query)
+# پردازش دکمه‌ها
 # ======================================================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """پردازش کلیک روی دکمه‌های تعاملی"""
     query = update.callback_query
     await query.answer()
     
@@ -132,9 +127,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📌 این ربات برای پیدا کردن نسخه Open Access مقالات علمی طراحی شده است.\n\n"
             "🔹 **منابع جستجو:**\n"
             "• Crossref\n"
+            "• Unpaywall\n"
             "• Sci-Hub\n"
             "• PubMed\n"
-            "• Unpaywall\n"
             "• Semantic Scholar\n"
             "• arXiv\n"
             "• CORE\n"
@@ -155,10 +150,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ======================================================
-# دستور: اضافه کردن کانال
+# دستورات مدیریت کانال
 # ======================================================
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """اضافه کردن کانال جدید به لیست جستجو"""
     if not context.args:
         await update.message.reply_text(
             "❌ لطفاً نام کانال را وارد کنید.\n"
@@ -178,11 +172,7 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 لیست فعلی: {', '.join([f'@{ch}' for ch in SEARCH_CHANNELS])}"
     )
 
-# ======================================================
-# دستور: حذف کانال
-# ======================================================
 async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """حذف کانال از لیست جستجو"""
     if not context.args:
         await update.message.reply_text(
             "❌ لطفاً نام کانال را وارد کنید.\n"
@@ -201,11 +191,7 @@ async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 لیست فعلی: {', '.join([f'@{ch}' for ch in SEARCH_CHANNELS])}"
     )
 
-# ======================================================
-# دستور: نمایش لیست کانال‌ها
-# ======================================================
 async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """نمایش لیست کانال‌های جستجو"""
     if not SEARCH_CHANNELS:
         await update.message.reply_text("📭 لیست کانال‌ها خالی است.")
         return
@@ -220,52 +206,24 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # پردازش اصلی پیام‌ها
 # ======================================================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ============================================================
-    # 1. اعتبارسنجی ورودی
-    # ============================================================
-    if not update.message:
-        return
-    
-    if not update.message.text:
-        await update.message.reply_text(
-            "❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).\n\n"
-            "💡 می‌توانید از دکمه /start برای راهنمایی استفاده کنید."
-        )
+    # اعتبارسنجی
+    if not update.message or not update.message.text:
         return
     
     text = update.message.text.strip()
-    
-    if not text:
-        await update.message.reply_text(
-            "❌ لطفاً یک متن معتبر ارسال کن.\n\n"
-            "💡 برای راهنمایی، دکمه /start را بزنید."
-        )
-        return
-    
-    if text.startswith('/'):
+    if not text or text.startswith('/'):
         return
     
     print(f"📩 Received message: {text[:100]}...")
     
-    # ============================================================
-    # 2. استخراج هوشمند query از ورودی کاربر
-    # ============================================================
+    # استخراج DOI
     doi_match = DOI_PATTERN.search(text)
+    query = doi_match.group(0) if doi_match else text
+    print(f"🔍 Extracted DOI: {query}")
     
-    if doi_match:
-        query = doi_match.group(0)
-        print(f"🔍 Extracted DOI: {query}")
-    else:
-        query = text
-        print(f"🔍 Using text as query: {query[:100]}...")
-    
-    # ============================================================
-    # 3. Check cache (Supabase)
-    # ============================================================
-    print(f"🔍 Checking cache for: {query}")
+    # بررسی کش
     cached = get_cached(query)
     if cached:
-        print(f"✅ Cache hit for: {query}")
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=cached["file_id"],
@@ -273,11 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ============================================================
-    # 4. Check temp cache
-    # ============================================================
     if query in TEMP_CACHE:
-        print(f"✅ Temp cache hit for: {query}")
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=TEMP_CACHE[query]["file_id"],
@@ -285,57 +239,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # ============================================================
-    # 5. Search
-    # ============================================================
-    print(f"🔍 Searching for: {query}")
-    await update.message.reply_text(
-        "🔎 در حال جستجو در منابع Open Access...\n"
-        "⏳ این عمل ممکن است چند ثانیه طول بکشد."
-    )
+    # جستجو
+    await update.message.reply_text("🔎 در حال جستجو در منابع Open Access...\n⏳ این عمل ممکن است چند ثانیه طول بکشد.")
     
     result = search_open_access(query)
     if not result:
-        print(f"❌ No results found for: {query}")
-        await update.message.reply_text(
-            "❌ مقاله پیدا نشد.\n\n"
-            "💡 **نکات:**\n"
-            "• مطمئن شوید DOI یا عنوان درست است\n"
-            "• برخی مقالات ممکن است پولی باشند\n"
-            "• از DOI استفاده کنید (مثلاً 10.1038/...)\n"
-            "• برای راهنمایی بیشتر، /start را بزنید"
-        )
+        await update.message.reply_text("❌ مقاله پیدا نشد.")
         return
     
-    print(f"✅ Found result: {result.get('title', 'Unknown')[:50]}...")
-    
     try:
-        # ============================================================
-        # 6. دانلود PDF
-        # ============================================================
+        # دانلود PDF
         await update.message.reply_text("📥 در حال دانلود PDF...")
         
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept": "application/pdf, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/pdf,text/html,*/*",
         }
         
-        print(f"📥 Downloading PDF from: {result['pdf_url']}")
         pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
         
         if pdf_resp.status_code != 200:
-            print(f"❌ Download failed with status: {pdf_resp.status_code}")
             await update.message.reply_text(f"❌ دانلود PDF ناموفق بود. (کد: {pdf_resp.status_code})")
             return
         
-        # ============================================================
-        # 7. بررسی محتوا
-        # ============================================================
+        # بررسی محتوا
         content_type = pdf_resp.headers.get('content-type', '').lower()
         content_length = len(pdf_resp.content)
-        print(f"📄 Content type: {content_type}, Size: {content_length} bytes")
         
         if 'text/html' in content_type or content_length < 50000:
             await update.message.reply_text("🔄 تلاش مجدد برای دریافت PDF...")
@@ -343,34 +272,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
             
             if pdf_resp.status_code != 200:
-                print(f"❌ Retry download failed with status: {pdf_resp.status_code}")
                 await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
                 return
             
             content_type = pdf_resp.headers.get('content-type', '').lower()
             content_length = len(pdf_resp.content)
-            print(f"📄 Retry content type: {content_type}, Size: {content_length} bytes")
         
         if 'application/pdf' not in content_type and not pdf_resp.url.endswith('.pdf'):
-            print(f"❌ Not a PDF file. Content type: {content_type}")
             await update.message.reply_text(f"⚠️ فایل دانلود شده PDF نیست. (نوع: {content_type})")
             return
         
         if content_length < 50000:
-            print(f"❌ File too small: {content_length} bytes")
-            await update.message.reply_text("⚠️ فایل دانلود شده بسیار کوچک است. احتمالاً مقاله در دسترس نیست.")
+            await update.message.reply_text("⚠️ فایل دانلود شده بسیار کوچک است.")
             return
         
-        # ============================================================
-        # 8. ساخت کپشن کامل با اطلاعات مقاله
-        # ============================================================
+        # ساخت کپشن
         title = result.get("title", "Unknown Title")
         authors = result.get("authors", "Unknown Authors")
         journal = result.get("journal", "Unknown Journal")
         year = result.get("year", "Unknown Year")
         doi = query if query.startswith("10.") else result.get("doi", "")
         
-        # استخراج ناشر برای هشتگ
         publisher = "unknown"
         hashtag = ""
         if doi.startswith("10."):
@@ -381,7 +303,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
         
-        # کپشن کامل برای کاربر
         full_caption = f"""📄 **{title}**
 
 📝 **Authors:** {authors}
@@ -389,14 +310,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📚 **Journal:** {journal}
 🔗 **DOI:** {doi} (https://doi.org/{doi})"""
         
-        # کپشن ساده برای کانال
         channel_caption = f"{title}\n\n{hashtag}\n{doi} (https://doi.org/{doi})"
         
-        # ============================================================
-        # 9. ذخیره در کانال
-        # ============================================================
-        await update.message.reply_text("📤 در حال ذخیره در کانال...")
-        
+        # ذخیره در کانال
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             f.write(pdf_resp.content)
             f.flush()
@@ -408,19 +324,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=channel_caption
             )
             file_id = channel_msg.document.file_id
-            
             os.remove(temp_path)
         
-        # ============================================================
-        # 10. ذخیره در کش
-        # ============================================================
+        # ذخیره در کش
         save_paper(query=query, title=title, file_id=file_id, source=result.get("source", "unknown"))
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
-        print(f"✅ Paper saved to cache: {title[:50]}...")
         
-        # ============================================================
-        # 11. ارسال به کاربر با دکمه‌ها
-        # ============================================================
+        # ارسال به کاربر
         keyboard = [
             [
                 InlineKeyboardButton("📥 دانلود مجدد", callback_data="download_again"),
@@ -430,25 +340,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 InlineKeyboardButton("📚 منوی اصلی", callback_data="back_to_main"),
             ]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=file_id,
             caption=full_caption,
             parse_mode="Markdown",
-            reply_markup=reply_markup
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        print(f"✅ Paper sent to user: {update.effective_chat.id}")
         
-    except requests.exceptions.Timeout:
-        print("❌ Download timeout")
-        await update.message.reply_text("⏰ زمان دانلود به پایان رسید. لطفاً دوباره تلاش کنید.")
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Download request error: {e}")
-        await update.message.reply_text(f"❌ خطا در دانلود: {str(e)}")
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
         await update.message.reply_text(f"⚠️ خطا: {str(e)}")
 
 # ======================================================
@@ -460,7 +361,6 @@ def main():
     print(f"📚 Publisher map: {len(PUBLISHER_MAP)} publishers")
     
     app = Application.builder().token(BOT_TOKEN).build()
-    
     app.bot_data['channels'] = SEARCH_CHANNELS
     
     app.add_handler(CommandHandler("start", start))
@@ -475,15 +375,8 @@ def main():
     if is_render:
         port = int(os.environ.get("PORT", 10000))
         webhook_url = f"https://paperbot-ng4v.onrender.com/"
-        
         print(f"🚀 Starting with Webhook on port {port}")
-        print(f"📡 Webhook URL: {webhook_url}")
-        
-        app.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            webhook_url=webhook_url
-        )
+        app.run_webhook(listen="0.0.0.0", port=port, webhook_url=webhook_url)
     else:
         print("🚀 Starting with Polling (local mode)")
         app.run_polling()
