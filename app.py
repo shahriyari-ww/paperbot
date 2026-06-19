@@ -7,7 +7,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
 from db import get_cached, save_paper
 from search_service import search_open_access
-from channel_search import search_in_channels
+
+# کش موقت در حافظه (برای مواقعی که Supabase کار نمی‌کند)
+TEMP_CACHE = {}
 
 # ---------------- START COMMAND ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,7 +71,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن.")
         return
     
-    # 1. check cache (Supabase)
+    # 1. Check cache (Supabase)
     cached = get_cached(query)
     if cached:
         await context.bot.send_document(
@@ -79,28 +81,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # 2. جستجو در کانال‌های مشخص شده
-    await update.message.reply_text("🔍 در حال جستجو در کانال‌های ذخیره شده...")
-    
-    # جستجو در کانال‌ها
-    channel_result = await search_in_channels(query, context.bot, context)
-    if channel_result:
-        # اگر در کانال پیدا شد
+    # 2. Check temp cache (اگر Supabase کار نمی‌کند)
+    if query in TEMP_CACHE:
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
-            document=channel_result["file_id"],
-            caption=f"📄 از کانال @{channel_result.get('channel', 'unknown')} ارسال شد"
-        )
-        # ذخیره در کش
-        save_paper(
-            query=query,
-            title=channel_result.get("title", "Unknown"),
-            file_id=channel_result["file_id"],
-            source="channel"
+            document=TEMP_CACHE[query]["file_id"],
+            caption=f"📄 از کش موقت ارسال شد\n\n📌 {TEMP_CACHE[query].get('title', '')}"
         )
         return
     
-    # 3. جستجوی معمولی
+    # 3. Search (با اولویت‌بندی جدید)
     await update.message.reply_text("🔎 جستجو در منابع Open Access...")
     result = search_open_access(query)
     if not result:
@@ -108,41 +98,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        # 4. دانلود PDF
+        # دانلود PDF
         pdf_resp = requests.get(result["pdf_url"], timeout=60)
         if pdf_resp.status_code != 200:
             await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
             return
         
-        # 5. ساخت کپشن هوشمند با هشتگ ناشر
+        # ساخت کپشن با هشتگ ناشر
         title = result["title"]
         doi = query if query.startswith("10.") else result.get("doi", "")
-        
-        # استخراج ناشر از DOI
         publisher = "unknown"
         hashtag = ""
         if doi.startswith("10."):
             try:
-                # مثال: 10.1016/j.seta.2026.104989 -> 1016
                 publisher_part = doi.split("/")[0].replace("10.", "")
-                # استفاده از دیکشنری نگاشت
                 publisher = PUBLISHER_MAP.get(publisher_part, publisher_part)
                 hashtag = f"#pub_{publisher}"
             except:
                 pass
         
-        # ساخت کپشن نهایی
         if hashtag:
             caption = f"{title}\n\n{hashtag}\n{doi} (https://doi.org/{doi})"
         else:
             caption = f"{title}\n\n{doi} (https://doi.org/{doi})"
         
-        # 6. ذخیره فایل موقت
+        # ذخیره در کانال و کش
         with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
             f.write(pdf_resp.content)
             f.flush()
             
-            # 7. آپلود به کانال خصوصی با کپشن جدید
             channel_msg = await context.bot.send_document(
                 chat_id=CHANNEL_ID,
                 document=f.name,
@@ -150,15 +134,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             file_id = channel_msg.document.file_id
         
-        # 8. ذخیره در Supabase
-        save_paper(
-            query=query,
-            title=title,
-            file_id=file_id,
-            source=result["source"]
-        )
+        # ذخیره در Supabase و کش موقت
+        save_paper(query=query, title=title, file_id=file_id, source=result["source"])
+        TEMP_CACHE[query] = {"title": title, "file_id": file_id}  # کش موقت
         
-        # 9. ارسال به کاربر
+        # ارسال به کاربر
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=file_id,
