@@ -1,5 +1,6 @@
 # app.py
 import os
+import re
 import tempfile
 import requests
 from telegram import Update
@@ -8,10 +9,17 @@ from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
 from db import get_cached, save_paper
 from search_service import search_open_access
 
+# ======================================================
 # کش موقت در حافظه (برای مواقعی که Supabase کار نمی‌کند)
+# ======================================================
 TEMP_CACHE = {}
 
-# ---------------- START COMMAND ----------------
+# الگوی تشخیص DOI از متن
+DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
+
+# ======================================================
+# دستور START
+# ======================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "سلام 👋\n\n"
@@ -20,7 +28,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📚 کانال‌های جستجو:\n" + "\n".join([f"• @{ch}" for ch in SEARCH_CHANNELS])
     )
 
-# ---------------- COMMAND: ADD CHANNEL ----------------
+# ======================================================
+# دستور: اضافه کردن کانال
+# ======================================================
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اضافه کردن کانال جدید به لیست جستجو"""
     if not context.args:
@@ -35,7 +45,9 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     SEARCH_CHANNELS.append(channel)
     await update.message.reply_text(f"✅ کانال @{channel} به لیست جستجو اضافه شد.")
 
-# ---------------- COMMAND: REMOVE CHANNEL ----------------
+# ======================================================
+# دستور: حذف کانال
+# ======================================================
 async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """حذف کانال از لیست جستجو"""
     if not context.args:
@@ -50,7 +62,9 @@ async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     SEARCH_CHANNELS.remove(channel)
     await update.message.reply_text(f"✅ کانال @{channel} از لیست جستجو حذف شد.")
 
-# ---------------- COMMAND: LIST CHANNELS ----------------
+# ======================================================
+# دستور: نمایش لیست کانال‌ها
+# ======================================================
 async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """نمایش لیست کانال‌های جستجو"""
     if not SEARCH_CHANNELS:
@@ -63,15 +77,38 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(message)
 
-# ---------------- MAIN HANDLER ----------------
+# ======================================================
+# پردازش اصلی پیام‌ها
+# ======================================================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.strip()
-    
-    if not query:
-        await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن.")
+    # بررسی وجود پیام متنی
+    if not update.message or not update.message.text:
+        if update.message:
+            await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).")
         return
     
+    text = update.message.text.strip()
+    
+    # استخراج DOI از متن (اگر وجود داشته باشد)
+    doi_match = DOI_PATTERN.search(text)
+    
+    if doi_match:
+        # اگر DOI پیدا شد، از آن استفاده کن
+        query = doi_match.group(0)
+        # ذخیره متن کامل برای استفاده در عنوان
+        full_text = text
+    else:
+        # در غیر این صورت از کل متن به عنوان عنوان استفاده کن
+        query = text
+        full_text = text
+    
+    if not query:
+        await update.message.reply_text("❌ لطفاً یک DOI یا عنوان مقاله معتبر ارسال کن.")
+        return
+    
+    # ============================================================
     # 1. Check cache (Supabase)
+    # ============================================================
     cached = get_cached(query)
     if cached:
         await context.bot.send_document(
@@ -81,7 +118,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # ============================================================
     # 2. Check temp cache (اگر Supabase کار نمی‌کند)
+    # ============================================================
     if query in TEMP_CACHE:
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
@@ -90,7 +129,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # ============================================================
     # 3. Search (با اولویت‌بندی جدید)
+    # ============================================================
     await update.message.reply_text("🔎 جستجو در منابع Open Access...")
     result = search_open_access(query)
     if not result:
@@ -98,7 +139,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
+        # ============================================================
         # دانلود PDF با هدرهای مناسب
+        # ============================================================
         await update.message.reply_text("📥 در حال دانلود PDF...")
         
         headers = {
@@ -115,7 +158,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ دانلود PDF ناموفق بود. (کد: {pdf_resp.status_code})")
             return
         
+        # ============================================================
         # بررسی اینکه آیا محتوا واقعاً PDF است
+        # ============================================================
         content_type = pdf_resp.headers.get('content-type', '').lower()
         content_length = len(pdf_resp.content)
         
@@ -138,14 +183,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # اگر هنوز PDF نیست یا حجم فایل کم است
         if 'application/pdf' not in content_type and not pdf_resp.url.endswith('.pdf'):
             await update.message.reply_text(f"⚠️ فایل دانلود شده PDF نیست. (نوع: {content_type})")
-            # ادامه نمی‌دهیم
             return
         
         if content_length < 50000:  # کمتر از 50 کیلوبایت
             await update.message.reply_text("⚠️ فایل دانلود شده بسیار کوچک است. احتمالاً مقاله در دسترس نیست.")
             return
         
+        # ============================================================
         # ساخت کپشن با هشتگ ناشر
+        # ============================================================
         title = result["title"]
         doi = query if query.startswith("10.") else result.get("doi", "")
         publisher = "unknown"
@@ -163,7 +209,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             caption = f"{title}\n\n{doi} (https://doi.org/{doi})"
         
+        # ============================================================
         # ذخیره در کانال و کش
+        # ============================================================
         await update.message.reply_text("📤 در حال ذخیره در کانال...")
         
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
@@ -181,11 +229,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # پاک کردن فایل موقت
             os.remove(temp_path)
         
+        # ============================================================
         # ذخیره در Supabase و کش موقت
+        # ============================================================
         save_paper(query=query, title=title, file_id=file_id, source=result["source"])
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
         
+        # ============================================================
         # ارسال به کاربر
+        # ============================================================
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=file_id,
@@ -199,7 +251,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ خطا: {str(e)}")
 
-# ---------------- MAIN ----------------
+# ======================================================
+# تابع اصلی
+# ======================================================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
