@@ -4,8 +4,9 @@ import re
 import sys
 import tempfile
 import requests
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
 from db import get_cached, save_paper
 from search_service import search_open_access
@@ -19,15 +20,160 @@ TEMP_CACHE = {}
 DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 
 # ======================================================
-# دستور START
+# توابع کمکی برای دکمه‌ها
+# ======================================================
+
+def get_main_keyboard():
+    """کیبورد اصلی با دکمه‌های تعاملی"""
+    keyboard = [
+        [
+            InlineKeyboardButton("📚 راهنما", callback_data="help"),
+            InlineKeyboardButton("📊 آمار", callback_data="stats"),
+        ],
+        [
+            InlineKeyboardButton("📋 لیست کانال‌ها", callback_data="list_channels"),
+            InlineKeyboardButton("❓ درباره", callback_data="about"),
+        ],
+        [
+            InlineKeyboardButton("🔍 جستجوی سریع", switch_inline_query_current_chat=""),
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_help_keyboard():
+    """کیبورد بازگشت به منوی اصلی"""
+    keyboard = [
+        [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+# ======================================================
+# توضیحات در چت خالی (Before Start)
+# ======================================================
+
+async def handle_empty_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """هنگامی که کاربر ربات را در چت خالی باز می‌کند"""
+    # بررسی اینکه آیا کاربر تازه وارد شده و چت خالی است
+    if update.message and not update.message.text:
+        await update.message.reply_text(
+            "👋 به ربات دانلود مقاله خوش آمدید!\n\n"
+            "برای شروع کار، یکی از گزینه‌های زیر را انتخاب کنید:\n"
+            "• دکمه /start را بزنید\n"
+            "• یک DOI یا عنوان مقاله ارسال کنید\n"
+            "• از دکمه‌های زیر استفاده کنید\n\n"
+            "📌 ربات به شما کمک می‌کند تا نسخه Open Access مقالات را پیدا کنید.",
+            reply_markup=get_main_keyboard()
+        )
+        return
+
+# ======================================================
+# دستور START با دکمه‌ها و توضیحات
 # ======================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    """دستور شروع با دکمه‌های تعاملی"""
+    welcome_text = (
         "سلام 👋\n\n"
-        "DOI یا عنوان مقاله را ارسال کن تا نسخه Open Access آن بررسی شود.\n\n"
-        "📌 ربات ابتدا در کش، سپس در کانال‌های مشخص شده جستجو می‌کند.\n\n"
-        "📚 کانال‌های جستجو:\n" + "\n".join([f"• @{ch}" for ch in SEARCH_CHANNELS])
+        "به ربات دانلود مقاله خوش آمدید!\n\n"
+        "🔹 **چگونه کار می‌کند؟**\n"
+        "• DOI یا عنوان مقاله را ارسال کنید\n"
+        "• ربات در منابع Open Access جستجو می‌کند\n"
+        "• در صورت پیدا شدن، PDF را برای شما ارسال می‌کند\n\n"
+        "🔹 **ویژگی‌ها:**\n"
+        "• جستجو در ۱۰ منبع مختلف\n"
+        "• ذخیره خودکار در کش برای دفعات بعد\n"
+        "• پشتیبانی از کانال‌های تلگرام\n\n"
+        "📚 **کانال‌های جستجو:**\n" + "\n".join([f"• @{ch}" for ch in SEARCH_CHANNELS]) + "\n\n"
+        "👇 از دکمه‌های زیر برای اطلاعات بیشتر استفاده کنید:"
     )
+    
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=get_main_keyboard(),
+        parse_mode="Markdown"
+    )
+
+# ======================================================
+# پردازش دکمه‌ها (Callback Query)
+# ======================================================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """پردازش کلیک روی دکمه‌های تعاملی"""
+    query = update.callback_query
+    await query.answer()  # پاسخ به تلگرام برای جلوگیری از خطا
+    
+    data = query.data
+    
+    if data == "help":
+        help_text = (
+            "📚 **راهنمای استفاده از ربات**\n\n"
+            "1️⃣ **ارسال DOI:**\n"
+            "مثلاً: `10.1016/j.colsurfa.2024.135789`\n\n"
+            "2️⃣ **ارسال عنوان مقاله:**\n"
+            "مثلاً: `A Novel Coronavirus from Patients with Pneumonia`\n\n"
+            "3️⃣ **ارسال لینک مقاله:**\n"
+            "مثلاً: `https://doi.org/10.1056/NEJMoa2001017`\n\n"
+            "4️⃣ **مدیریت کانال‌ها:**\n"
+            "• `/add_channel @channel` - اضافه کردن کانال\n"
+            "• `/remove_channel @channel` - حذف کانال\n"
+            "• `/list_channels` - نمایش لیست کانال‌ها\n\n"
+            "📌 **نکته:** مقالات پس از اولین جستجو در کش ذخیره می‌شوند."
+        )
+        await query.edit_message_text(help_text, parse_mode="Markdown", reply_markup=get_help_keyboard())
+    
+    elif data == "stats":
+        # آمار ربات
+        total_cached = len(TEMP_CACHE)
+        total_channels = len(SEARCH_CHANNELS)
+        total_publishers = len(PUBLISHER_MAP)
+        
+        stats_text = (
+            "📊 **آمار ربات**\n\n"
+            f"📚 **تعداد مقالات در کش:** {total_cached}\n"
+            f"📋 **تعداد کانال‌های جستجو:** {total_channels}\n"
+            f"🏢 **تعداد ناشران شناسایی‌شده:** {total_publishers}\n"
+            f"🔍 **منابع جستجو:** ۱۰ منبع\n\n"
+            f"⚡ **وضعیت:** {'فعال ✅' if BOT_TOKEN else 'غیرفعال ❌'}\n"
+            f"📅 **آخرین بروزرسانی:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        await query.edit_message_text(stats_text, parse_mode="Markdown", reply_markup=get_help_keyboard())
+    
+    elif data == "list_channels":
+        if not SEARCH_CHANNELS:
+            list_text = "📭 لیست کانال‌ها خالی است."
+        else:
+            list_text = "📋 **لیست کانال‌های جستجو:**\n\n"
+            for i, ch in enumerate(SEARCH_CHANNELS, 1):
+                list_text += f"{i}. @{ch}\n"
+        
+        await query.edit_message_text(list_text, parse_mode="Markdown", reply_markup=get_help_keyboard())
+    
+    elif data == "about":
+        about_text = (
+            "❓ **درباره ربات**\n\n"
+            "📌 این ربات برای پیدا کردن نسخه Open Access مقالات علمی طراحی شده است.\n\n"
+            "🔹 **منابع جستجو:**\n"
+            "• Sci-Hub\n"
+            "• PubMed\n"
+            "• Crossref\n"
+            "• Unpaywall\n"
+            "• Semantic Scholar\n"
+            "• arXiv\n"
+            "• CORE\n"
+            "• BASE\n"
+            "• DOAJ\n"
+            "• و کانال‌های تلگرام\n\n"
+            "🔹 **توسعه‌دهنده:** @Mohammadsh7\n"
+            "🔹 **نسخه:** 2.0.0\n"
+            "🔹 **وضعیت:** 🟢 فعال"
+        )
+        await query.edit_message_text(about_text, parse_mode="Markdown", reply_markup=get_help_keyboard())
+    
+    elif data == "back_to_main":
+        # بازگشت به منوی اصلی
+        await query.edit_message_text(
+            "👋 به منوی اصلی بازگشتید.\n\n"
+            "DOI یا عنوان مقاله را ارسال کنید یا از دکمه‌ها استفاده کنید:",
+            reply_markup=get_main_keyboard()
+        )
 
 # ======================================================
 # دستور: اضافه کردن کانال
@@ -35,7 +181,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """اضافه کردن کانال جدید به لیست جستجو"""
     if not context.args:
-        await update.message.reply_text("❌ لطفاً نام کانال را وارد کنید.\nمثال: /add_channel nexus_aaron")
+        await update.message.reply_text(
+            "❌ لطفاً نام کانال را وارد کنید.\n"
+            "مثال: `/add_channel nexus_aaron`\n\n"
+            "📌 نام کانال را بدون @ وارد کنید."
+        )
         return
     
     channel = context.args[0].replace("@", "")
@@ -44,7 +194,10 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     SEARCH_CHANNELS.append(channel)
-    await update.message.reply_text(f"✅ کانال @{channel} به لیست جستجو اضافه شد.")
+    await update.message.reply_text(
+        f"✅ کانال @{channel} به لیست جستجو اضافه شد.\n\n"
+        f"📋 لیست فعلی: {', '.join([f'@{ch}' for ch in SEARCH_CHANNELS])}"
+    )
 
 # ======================================================
 # دستور: حذف کانال
@@ -52,7 +205,10 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """حذف کانال از لیست جستجو"""
     if not context.args:
-        await update.message.reply_text("❌ لطفاً نام کانال را وارد کنید.\nمثال: /remove_channel nexus_aaron")
+        await update.message.reply_text(
+            "❌ لطفاً نام کانال را وارد کنید.\n"
+            "مثال: `/remove_channel nexus_aaron`"
+        )
         return
     
     channel = context.args[0].replace("@", "")
@@ -61,7 +217,10 @@ async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     SEARCH_CHANNELS.remove(channel)
-    await update.message.reply_text(f"✅ کانال @{channel} از لیست جستجو حذف شد.")
+    await update.message.reply_text(
+        f"✅ کانال @{channel} از لیست جستجو حذف شد.\n\n"
+        f"📋 لیست فعلی: {', '.join([f'@{ch}' for ch in SEARCH_CHANNELS])}"
+    )
 
 # ======================================================
 # دستور: نمایش لیست کانال‌ها
@@ -72,11 +231,11 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 لیست کانال‌ها خالی است.")
         return
     
-    message = "📚 لیست کانال‌های جستجو:\n\n"
+    message = "📚 **لیست کانال‌های جستجو:**\n\n"
     for i, ch in enumerate(SEARCH_CHANNELS, 1):
         message += f"{i}. @{ch}\n"
     
-    await update.message.reply_text(message)
+    await update.message.reply_text(message, parse_mode="Markdown")
 
 # ======================================================
 # پردازش اصلی پیام‌ها
@@ -91,14 +250,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # بررسی وجود متن در پیام
     if not update.message.text:
-        await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).")
+        await update.message.reply_text(
+            "❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).\n\n"
+            "💡 می‌توانید از دکمه /start برای راهنمایی استفاده کنید."
+        )
         return
     
     text = update.message.text.strip()
     
     # اگر پیام خالی بود
     if not text:
-        await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن.")
+        await update.message.reply_text(
+            "❌ لطفاً یک متن معتبر ارسال کن.\n\n"
+            "💡 برای راهنمایی، دکمه /start را بزنید."
+        )
+        return
+    
+    # اگر پیام با / شروع شد (دستور است)، پردازش نمی‌شود
+    if text.startswith('/'):
         return
     
     # لاگ دریافت پیام (برای عیب‌یابی)
@@ -149,12 +318,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 5. Search (با اولویت‌بندی جدید)
     # ============================================================
     print(f"🔍 Searching for: {query}")
-    await update.message.reply_text("🔎 جستجو در منابع Open Access...")
+    await update.message.reply_text(
+        "🔎 در حال جستجو در منابع Open Access...\n"
+        "⏳ این عمل ممکن است چند ثانیه طول بکشد."
+    )
     
     result = search_open_access(query)
     if not result:
         print(f"❌ No results found for: {query}")
-        await update.message.reply_text("❌ مقاله پیدا نشد.")
+        await update.message.reply_text(
+            "❌ مقاله پیدا نشد.\n\n"
+            "💡 **نکات:**\n"
+            "• مطمئن شوید DOI یا عنوان درست است\n"
+            "• برخی مقالات ممکن است پولی باشند\n"
+            "• از DOI استفاده کنید (مثلاً 10.1038/...)\n"
+            "• برای راهنمایی بیشتر، /start را بزنید"
+        )
         return
     
     print(f"✅ Found result: {result.get('title', 'Unknown')[:50]}...")
@@ -265,12 +444,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"✅ Paper saved to cache: {title[:50]}...")
         
         # ============================================================
-        # 11. ارسال به کاربر
+        # 11. ارسال به کاربر با دکمه‌های تعاملی
         # ============================================================
+        keyboard = [
+            [
+                InlineKeyboardButton("📥 دانلود مجدد", callback_data="download_again"),
+                InlineKeyboardButton("🔍 جستجوی جدید", switch_inline_query_current_chat=""),
+            ],
+            [
+                InlineKeyboardButton("📚 منوی اصلی", callback_data="back_to_main"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=file_id,
-            caption=f"📄 {title}\n📚 منبع: {result['source']}"
+            caption=f"📄 {title}\n📚 منبع: {result['source']}\n✅ ذخیره شده در کش برای دفعات بعد",
+            reply_markup=reply_markup
         )
         print(f"✅ Paper sent to user: {update.effective_chat.id}")
         
@@ -303,6 +494,7 @@ def main():
     app.add_handler(CommandHandler("remove_channel", remove_channel))
     app.add_handler(CommandHandler("list_channels", list_channels))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
     
     # ============================================================
     # انتخاب روش اجرا (Webhook یا Polling)
