@@ -1,87 +1,78 @@
 # channel_search.py
 import re
 import asyncio
+from typing import Optional, Dict, Any
 from telegram import Update
 from telegram.ext import ContextTypes
-from db import get_cached, save_paper
-from config import CHANNEL_IDS  # لیست کانال‌ها
+from config import CHANNEL_IDS
 
-# لیست کانال‌هایی که باید بررسی شوند
-# می‌توانید در config.py تعریف کنید یا اینجا
-DEFAULT_CHANNELS = [
-    "@nexus_aaron",
-    "@scihubot",
-    "@sks7777777nexusbot",
-    # کانال‌های دیگر را اضافه کنید
-]
-
-# لیست کلمات کلیدی برای شناسایی مقاله
+# الگوی تشخیص DOI
 DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 
-async def search_in_channels(query: str, bot, context: ContextTypes.DEFAULT_TYPE):
+async def search_in_channels(query: str, bot, context: ContextTypes.DEFAULT_TYPE) -> Optional[Dict[str, Any]]:
     """
-    جستجوی مقاله در کانال‌های مشخص شده
-    
-    Args:
-        query (str): DOI یا عنوان مقاله
-        bot: نمونه ربات
-        context: context تلگرام
-        
-    Returns:
-        dict: اطلاعات مقاله یا None
+    جستجوی مقاله در کانال‌های تلگرام با استفاده از ربات‌های جستجوگر
     """
-    # ابتدا کش را چک کن
-    cached = get_cached(query)
-    if cached:
-        print(f"✅ Cache hit for: {query}")
-        return cached
+    channels = context.bot_data.get('channels', [])
     
-    # جستجو در کانال‌ها
-    channels = getattr(context.bot_data, 'channels', DEFAULT_CHANNELS)
+    # اگر کانالی وجود ندارد، خروج
+    if not channels:
+        print("❌ No channels to search")
+        return None
     
-    for channel in channels:
+    # تشخیص DOI از query
+    doi_match = DOI_PATTERN.search(query)
+    doi = doi_match.group(0) if doi_match else query
+    
+    print(f"🔍 Searching channels for: {doi}")
+    
+    for channel_username in channels:
         try:
-            print(f"🔍 Searching in {channel}...")
+            # ساخت نام کامل کانال
+            channel_full = f"@{channel_username}" if not channel_username.startswith('@') else channel_username
             
-            # جستجو در کانال با استفاده از forward
-            # این روش فقط برای کانال‌هایی که ربات عضو است کار می‌کند
+            print(f"🔍 Searching in channel {channel_full}...")
+            
+            # ارسال درخواست جستجو به کانال (با تگ کردن ربات جستجوگر)
+            # فرض می‌کنیم کانال دارای ربات جستجوگر مثل @scihubot است
             try:
-                # ارسال پیام به کانال برای تست
+                # ارسال پیام جستجو به کانال
                 await bot.send_message(
-                    chat_id=channel,
-                    text=f"/search {query}",
+                    chat_id=channel_full,
+                    text=f"/search {doi}",
                     disable_notification=True
                 )
                 
-                # منتظر پاسخ بمان (این روش کامل نیست، نیاز به پیاده‌سازی بهتر دارد)
-                # در ادامه نسخه کامل‌تر ارائه شده است
+                # منتظر پاسخ می‌مانیم (در یک پیاده‌سازی واقعی، باید پاسخ را دریافت کنیم)
+                await asyncio.sleep(3)  # زمان برای پاسخ
+                
+                # در اینجا باید پاسخ را از کانال دریافت کنیم
+                # این بخش نیاز به پیاده‌سازی با MessageHandler دارد
+                # به عنوان نمونه، یک نتیجه ساختگی برمی‌گردانیم
+                # در نسخه واقعی، باید پاسخ واقعی را پردازش کنید
+                
+                # TODO: دریافت پاسخ از کانال
+                # برای نمونه، یک نتیجه برمی‌گردانیم
+                # return {"title": "Article from channel", "pdf_url": "...", "file_id": "..."}
                 
             except Exception as e:
-                print(f"❌ Error in {channel}: {e}")
+                print(f"⚠️ Error in channel {channel_full}: {e}")
                 continue
                 
         except Exception as e:
-            print(f"❌ Error searching {channel}: {e}")
+            print(f"❌ Error searching channel {channel_username}: {e}")
             continue
     
     return None
 
-async def get_from_channel(query: str, channel_id: str, bot):
+async def get_channel_message_by_doi(doi: str, channel_id: int, bot) -> Optional[Dict[str, Any]]:
     """
-    دریافت مستقیم مقاله از کانال با استفاده از message_id
-    
-    Args:
-        query (str): شناسه مقاله
-        channel_id (str): شناسه کانال
-        bot: نمونه ربات
-        
-    Returns:
-        dict: اطلاعات مقاله یا None
+    دریافت مستقیم پیام از کانال با استفاده از شناسه عددی کانال
     """
     try:
-        # این تابع نیاز به message_id دارد که باید از قبل ذخیره شده باشد
-        # یا با استفاده از فوروارد پیام‌ها
+        # این تابع نیاز به دسترسی به تاریخچه کانال دارد
+        # با استفاده از bot.get_chat_history یا روش‌های دیگر
         pass
     except Exception as e:
-        print(f"❌ Error getting from channel: {e}")
+        print(f"❌ Error getting message from channel: {e}")
         return None
