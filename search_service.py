@@ -16,17 +16,17 @@ def search_open_access(query: str):
     """
     # لیست ارائه‌دهندگان با ترتیب اولویت
     providers = [
-        ("Crossref", search_crossref),
-        ("Unpaywall", search_unpaywall),
-        ("Semantic Scholar", search_semantic_scholar),
+        ("Sci-Hub", search_scihub),
         ("arXiv", search_arxiv),
         ("PubMed", search_pubmed),
         ("PubMed Advanced", search_pubmed_advanced),
         ("CORE", search_core),
         ("BASE", search_base),
         ("DOAJ", search_doaj),
-        ("Sci-Hub", search_scihub),      # اضافه شد
-        ("Nexus", search_nexus)           # اضافه شد
+        ("Crossref", search_crossref),
+        ("Unpaywall", search_unpaywall),
+        ("Semantic Scholar", search_semantic_scholar),
+        ("Nexus", search_nexus)         
     ]
     
     for provider_name, search_func in providers:
