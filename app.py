@@ -1,6 +1,7 @@
 # app.py
 import os
 import re
+import sys
 import tempfile
 import requests
 from telegram import Update
@@ -84,10 +85,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ============================================================
     # 1. اعتبارسنجی ورودی
     # ============================================================
-    # بررسی وجود پیام متنی
-    if not update.message or not update.message.text:
-        if update.message:
-            await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).")
+    # بررسی وجود پیام
+    if not update.message:
+        return
+    
+    # بررسی وجود متن در پیام
+    if not update.message.text:
+        await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن (عنوان مقاله یا DOI).")
         return
     
     text = update.message.text.strip()
@@ -96,6 +100,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text("❌ لطفاً یک متن معتبر ارسال کن.")
         return
+    
+    # لاگ دریافت پیام (برای عیب‌یابی)
+    print(f"📩 Received message: {text[:100]}...")
     
     # ============================================================
     # 2. استخراج هوشمند query از ورودی کاربر
@@ -115,8 +122,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ============================================================
     # 3. Check cache (Supabase)
     # ============================================================
+    print(f"🔍 Checking cache for: {query}")
     cached = get_cached(query)
     if cached:
+        print(f"✅ Cache hit for: {query}")
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=cached["file_id"],
@@ -128,6 +137,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 4. Check temp cache (اگر Supabase کار نمی‌کند)
     # ============================================================
     if query in TEMP_CACHE:
+        print(f"✅ Temp cache hit for: {query}")
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=TEMP_CACHE[query]["file_id"],
@@ -138,11 +148,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ============================================================
     # 5. Search (با اولویت‌بندی جدید)
     # ============================================================
+    print(f"🔍 Searching for: {query}")
     await update.message.reply_text("🔎 جستجو در منابع Open Access...")
+    
     result = search_open_access(query)
     if not result:
+        print(f"❌ No results found for: {query}")
         await update.message.reply_text("❌ مقاله پیدا نشد.")
         return
+    
+    print(f"✅ Found result: {result.get('title', 'Unknown')[:50]}...")
     
     try:
         # ============================================================
@@ -157,10 +172,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Connection": "keep-alive",
         }
         
+        print(f"📥 Downloading PDF from: {result['pdf_url']}")
         pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
         
         # بررسی وضعیت دانلود
         if pdf_resp.status_code != 200:
+            print(f"❌ Download failed with status: {pdf_resp.status_code}")
             await update.message.reply_text(f"❌ دانلود PDF ناموفق بود. (کد: {pdf_resp.status_code})")
             return
         
@@ -169,6 +186,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ============================================================
         content_type = pdf_resp.headers.get('content-type', '').lower()
         content_length = len(pdf_resp.content)
+        print(f"📄 Content type: {content_type}, Size: {content_length} bytes")
         
         # اگر محتوا HTML بود، تلاش مجدد برای پیدا کردن PDF
         if 'text/html' in content_type or content_length < 50000:
@@ -179,19 +197,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
             
             if pdf_resp.status_code != 200:
+                print(f"❌ Retry download failed with status: {pdf_resp.status_code}")
                 await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
                 return
             
             # بررسی مجدد محتوا
             content_type = pdf_resp.headers.get('content-type', '').lower()
             content_length = len(pdf_resp.content)
+            print(f"📄 Retry content type: {content_type}, Size: {content_length} bytes")
         
         # اگر هنوز PDF نیست یا حجم فایل کم است
         if 'application/pdf' not in content_type and not pdf_resp.url.endswith('.pdf'):
+            print(f"❌ Not a PDF file. Content type: {content_type}")
             await update.message.reply_text(f"⚠️ فایل دانلود شده PDF نیست. (نوع: {content_type})")
             return
         
         if content_length < 50000:  # کمتر از 50 کیلوبایت
+            print(f"❌ File too small: {content_length} bytes")
             await update.message.reply_text("⚠️ فایل دانلود شده بسیار کوچک است. احتمالاً مقاله در دسترس نیست.")
             return
         
@@ -240,6 +262,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ============================================================
         save_paper(query=query, title=title, file_id=file_id, source=result["source"])
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
+        print(f"✅ Paper saved to cache: {title[:50]}...")
         
         # ============================================================
         # 11. ارسال به کاربر
@@ -249,18 +272,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             document=file_id,
             caption=f"📄 {title}\n📚 منبع: {result['source']}"
         )
+        print(f"✅ Paper sent to user: {update.effective_chat.id}")
         
     except requests.exceptions.Timeout:
+        print("❌ Download timeout")
         await update.message.reply_text("⏰ زمان دانلود به پایان رسید. لطفاً دوباره تلاش کنید.")
     except requests.exceptions.RequestException as e:
+        print(f"❌ Download request error: {e}")
         await update.message.reply_text(f"❌ خطا در دانلود: {str(e)}")
     except Exception as e:
+        print(f"❌ Unexpected error: {e}")
         await update.message.reply_text(f"⚠️ خطا: {str(e)}")
 
 # ======================================================
 # تابع اصلی
 # ======================================================
 def main():
+    print("🤖 Starting PaperBot...")
+    print(f"📚 Search channels: {SEARCH_CHANNELS}")
+    print(f"📚 Publisher map: {len(PUBLISHER_MAP)} publishers")
+    
     app = Application.builder().token(BOT_TOKEN).build()
     
     # ذخیره لیست کانال‌ها در context
@@ -273,12 +304,28 @@ def main():
     app.add_handler(CommandHandler("list_channels", list_channels))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    port = int(os.environ.get("PORT", 10000))
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        webhook_url=f"https://paperbot-ng4v.onrender.com/"
-    )
+    # ============================================================
+    # انتخاب روش اجرا (Webhook یا Polling)
+    # ============================================================
+    # تشخیص محیط: اگر در Render هستیم، از Webhook استفاده کن
+    is_render = os.environ.get("RENDER") or os.environ.get("PORT")
+    
+    if is_render:
+        port = int(os.environ.get("PORT", 10000))
+        webhook_url = f"https://paperbot-ng4v.onrender.com/"
+        
+        print(f"🚀 Starting with Webhook on port {port}")
+        print(f"📡 Webhook URL: {webhook_url}")
+        
+        app.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            webhook_url=webhook_url
+        )
+    else:
+        # در محیط محلی، از Polling استفاده کن
+        print("🚀 Starting with Polling (local mode)")
+        app.run_polling()
 
 if __name__ == "__main__":
     main()
