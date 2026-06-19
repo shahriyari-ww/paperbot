@@ -457,11 +457,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="Markdown"
     )
     
-    try:
-        channel_result = await search_in_channels(query, context.bot, context)
-        if channel_result:
-            print(f"✅ Found in Telegram channels")
-            CACHE_STATS["channel_hits"] += 1
+   # try:
+       # channel_result = await search_in_channels(query, context.bot, context)
+        #if channel_result:
+         #   print(f"✅ Found in Telegram channels")
+          #  CACHE_STATS["channel_hits"] += 1
             
             # اگر file_id موجود باشد، مستقیماً ارسال کن
             if channel_result.get("file_id"):
