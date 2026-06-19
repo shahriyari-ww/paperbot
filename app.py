@@ -6,7 +6,7 @@ import tempfile
 import aiohttp
 import urllib.parse
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Union
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
@@ -502,6 +502,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "🔎 **جستجو در منابع Open Access...**\n"
             "⏳ این عمل ممکن است ۱۰-۲۰ ثانیه طول بکشد.\n\n"
             "📚 منابع جستجو:\n"
+            "• OpenAlex (بیش از ۲۴۰ میلیون مقاله)\n"
             "• Crossref (اطلاعات کامل)\n"
             "• Unpaywall (PDF قانونی)\n"
             "• Sci-Hub (PDF جایگزین)\n"
@@ -510,12 +511,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         
         try:
-            result = await asyncio.to_thread(search_open_access, query)
+            results = await asyncio.to_thread(search_open_access, query)
         except Exception as e:
             print(f"❌ Search error: {e}")
-            result = None
+            results = None
     
-    if not result:
+    if not results:
         await update.message.reply_text(
             "❌ **مقاله پیدا نشد.**\n\n"
             "💡 **نکات:**\n"
@@ -528,9 +529,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         CACHE_STATS["failed_downloads"] += 1
         return
     
+    # ============================================================
+    # 7. پردازش نتایج (پشتیبانی از لیست و دیکشنری)
+    # ============================================================
+    if isinstance(results, list):
+        if len(results) == 0:
+            await update.message.reply_text("❌ **مقاله پیدا نشد.**")
+            return
+        result = results[0]  # اولین نتیجه را بگیر
+    else:
+        result = results  # اگر دیکشنری است
+    
+    if not result:
+        await update.message.reply_text("❌ **مقاله پیدا نشد.**")
+        return
+    
     try:
         # ============================================================
-        # 7. دانلود PDF
+        # 8. دانلود PDF
         # ============================================================
         await update.message.reply_text("📥 **در حال دانلود PDF...**")
         
@@ -544,7 +560,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         
         # ============================================================
-        # 8. ساخت کپشن کامل (یکسان برای کاربر و کانال)
+        # 9. ساخت کپشن کامل (یکسان برای کاربر و کانال)
         # ============================================================
         title = result.get("title", "Unknown Title")
         authors = result.get("authors", "Unknown Authors")
@@ -576,13 +592,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         channel_caption = full_caption
         
         # ============================================================
-        # 9. دریافت نام اصلی فایل
+        # 10. دریافت نام اصلی فایل
         # ============================================================
         original_filename = get_filename_from_metadata(result, result.get("pdf_url", ""))
         print(f"📄 Original filename: {original_filename}")
         
         # ============================================================
-        # 10. ذخیره در کانال با نام اصلی
+        # 11. ذخیره در کانال با نام اصلی
         # ============================================================
         await update.message.reply_text("📤 **در حال ذخیره در کانال...**")
         
@@ -612,14 +628,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         file_id = channel_msg.document.file_id
         
         # ============================================================
-        # 11. ذخیره در کش
+        # 12. ذخیره در کش
         # ============================================================
         save_paper(query=query, title=title, file_id=file_id, source=result.get("source", "unknown"))
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
         CACHE_STATS["successful_downloads"] += 1
         
         # ============================================================
-        # 12. ارسال به کاربر با نام اصلی
+        # 13. ارسال به کاربر با نام اصلی
         # ============================================================
         try:
             await context.bot.send_document(
