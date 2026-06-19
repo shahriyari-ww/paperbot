@@ -13,13 +13,12 @@ def search_open_access(query: str):
     """
     جستجو در منابع مختلف Open Access با اولویت‌بندی جدید
     """
-    # لیست ارائه‌دهندگان با اولویت جدید
     providers = [
         ("Crossref", search_crossref),      # اولویت اول برای دریافت متادیتا
-        ("Sci-Hub", search_scihub),          # برای دریافت PDF
+        ("Unpaywall", search_unpaywall),     # منبع قانونی برای PDF
+        ("Sci-Hub", search_scihub),          # منبع جایگزین برای PDF
         ("PubMed", search_pubmed),
         ("PubMed Advanced", search_pubmed_advanced),
-        ("Unpaywall", search_unpaywall),
         ("Semantic Scholar", search_semantic_scholar),
         ("arXiv", search_arxiv),
         ("CORE", search_core),
