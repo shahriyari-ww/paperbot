@@ -12,6 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
 from db import get_cached, save_paper
 from search_service import search_open_access
+from channel_search import search_in_channels
 
 # ======================================================
 # کش موقت در حافظه
@@ -23,6 +24,7 @@ CACHE_STATS = {
     "total_searches": 0,
     "successful_downloads": 0,
     "failed_downloads": 0,
+    "channel_hits": 0,
 }
 
 # الگوی تشخیص DOI
@@ -34,30 +36,18 @@ DOI_PATTERN = re.compile(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', re.IGNORECASE)
 
 def sanitize_filename(filename: str) -> str:
     """پاک‌سازی نام فایل از کاراکترهای غیرمجاز"""
-    # حذف کاراکترهای غیرمجاز در نام فایل
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    # حذف فاصله‌های اضافی
     filename = re.sub(r'\s+', ' ', filename).strip()
-    # کوتاه کردن نام در صورت طولانی بودن
     if len(filename) > 150:
         name, ext = os.path.splitext(filename)
         filename = name[:140] + "..." + ext
     return filename
 
 def get_filename_from_metadata(result: Dict[str, Any], pdf_url: str = None) -> str:
-    """
-    دریافت نام فایل از اطلاعات مقاله با اولویت‌بندی
-    
-    اولویت:
-    1. عنوان مقاله
-    2. نام فایل از URL
-    3. DOI
-    4. پیش‌فرض
-    """
+    """دریافت نام فایل از اطلاعات مقاله با اولویت‌بندی"""
     # 1. از عنوان مقاله
     title = result.get("title", "")
     if title and title != "Unknown Title" and title != "Article from Sci-Hub":
-        # حذف کاراکترهای غیرمجاز و محدود کردن طول
         safe_title = "".join(c for c in title if c.isalnum() or c in " .-_,")
         safe_title = re.sub(r'\s+', ' ', safe_title).strip()
         safe_title = sanitize_filename(safe_title)
@@ -87,7 +77,6 @@ def get_filename_from_metadata(result: Dict[str, Any], pdf_url: str = None) -> s
 # ======================================================
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
-    """کیبورد اصلی با دکمه‌های تعاملی"""
     keyboard = [
         [
             InlineKeyboardButton("📚 راهنما", callback_data="help"),
@@ -105,13 +94,11 @@ def get_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 def get_help_keyboard() -> InlineKeyboardMarkup:
-    """کیبورد بازگشت به منوی اصلی"""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔙 بازگشت به منوی اصلی", callback_data="back_to_main")]
     ])
 
 def get_download_keyboard() -> InlineKeyboardMarkup:
-    """کیبورد بعد از دانلود"""
     keyboard = [
         [
             InlineKeyboardButton("📥 دانلود مجدد", callback_data="download_again"),
@@ -126,7 +113,6 @@ def get_download_keyboard() -> InlineKeyboardMarkup:
 # ======================================================
 
 def get_cache_stats() -> Dict[str, Any]:
-    """دریافت آمار کش"""
     total = CACHE_STATS["hits"] + CACHE_STATS["misses"]
     return {
         "size": len(TEMP_CACHE),
@@ -135,10 +121,10 @@ def get_cache_stats() -> Dict[str, Any]:
         "hit_rate": (CACHE_STATS["hits"] / total * 100) if total > 0 else 0,
         "successful_downloads": CACHE_STATS["successful_downloads"],
         "failed_downloads": CACHE_STATS["failed_downloads"],
+        "channel_hits": CACHE_STATS["channel_hits"],
     }
 
 def update_cache_stats(hit: bool) -> None:
-    """به‌روزرسانی آمار کش"""
     if hit:
         CACHE_STATS["hits"] += 1
     else:
@@ -149,9 +135,6 @@ def update_cache_stats(hit: bool) -> None:
 # ======================================================
 
 async def download_pdf_with_retry(url: str, max_retries: int = 3) -> Optional[bytes]:
-    """
-    دانلود PDF با تلاش مجدد و Backoff تصاعدی
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/pdf,text/html,*/*",
@@ -166,7 +149,6 @@ async def download_pdf_with_retry(url: str, max_retries: int = 3) -> Optional[by
                         content = await response.read()
                         content_type = response.headers.get('content-type', '').lower()
                         
-                        # اگر محتوا PDF نیست و حجم کم است، تلاش مجدد
                         if ('application/pdf' not in content_type and not url.endswith('.pdf')) or len(content) < 50000:
                             if attempt < max_retries - 1:
                                 print(f"🔄 Retry {attempt + 1}/{max_retries} for download...")
@@ -188,17 +170,17 @@ async def download_pdf_with_retry(url: str, max_retries: int = 3) -> Optional[by
 # ======================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """دستور شروع با دکمه‌های تعاملی"""
     welcome_text = (
         "سلام 👋\n\n"
         "به **ربات دانلود مقاله** خوش آمدید!\n\n"
         "🔹 **چگونه کار می‌کند؟**\n"
         "• DOI یا عنوان مقاله را ارسال کنید\n"
-        "• ربات در ۱۰+ منبع Open Access جستجو می‌کند\n"
+        "• ربات ابتدا در کانال‌های تلگرام جستجو می‌کند\n"
+        "• سپس در ۱۰+ منبع Open Access جستجو می‌کند\n"
         "• اطلاعات کامل مقاله را نمایش می‌دهد\n"
         "• PDF را با نام اصلی مقاله ارسال می‌کند\n\n"
         "🔹 **ویژگی‌ها:**\n"
-        "• ⚡ جستجوی سریع در چندین منبع\n"
+        "• ⚡ جستجوی سریع در کانال‌ها و منابع\n"
         "• 💾 ذخیره خودکار در کش برای دفعات بعد\n"
         "• 📋 مدیریت کانال‌های تلگرام\n"
         "• 🏷️ شناسایی خودکار ناشر\n"
@@ -218,7 +200,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ======================================================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """پردازش کلیک روی دکمه‌های تعاملی"""
     query = update.callback_query
     await query.answer()
     
@@ -237,8 +218,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "• `/add_channel @channel` - اضافه کردن کانال\n"
             "• `/remove_channel @channel` - حذف کانال\n"
             "• `/list_channels` - نمایش لیست کانال‌ها\n\n"
-            "📌 **نکته:** مقالات پس از اولین جستجو در کش ذخیره می‌شوند.\n"
-            "📄 **نام فایل:** ربات نام اصلی مقاله را برای PDF حفظ می‌کند."
+            "📌 **ترتیب جستجو:**\n"
+            "1. کش (Supabase)\n"
+            "2. کانال‌های تلگرام\n"
+            "3. منابع Open Access\n\n"
+            "📄 **نام فایل:** ربات نام اصلی مقاله را حفظ می‌کند."
         )
         await query.edit_message_text(
             help_text,
@@ -253,7 +237,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"📚 **مقالات در کش:** {cache_stats['size']}\n"
             f"✅ **Cache Hit:** {cache_stats['hits']}\n"
             f"❌ **Cache Miss:** {cache_stats['misses']}\n"
-            f"📈 **نرخ موفقیت:** {cache_stats['hit_rate']:.1f}%\n"
+            f"📈 **نرخ موفقیت کش:** {cache_stats['hit_rate']:.1f}%\n"
             f"📥 **دانلود موفق:** {cache_stats['successful_downloads']}\n"
             f"❌ **دانلود ناموفق:** {cache_stats['failed_downloads']}\n"
             f"📋 **کانال‌ها:** {len(SEARCH_CHANNELS)}\n"
@@ -308,6 +292,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         about_text = (
             "❓ **درباره ربات**\n\n"
             "📌 این ربات برای پیدا کردن نسخه Open Access مقالات علمی طراحی شده است.\n\n"
+            "🔹 **ترتیب جستجو:**\n"
+            "1️⃣ کش (Supabase)\n"
+            "2️⃣ کانال‌های تلگرام\n"
+            "3️⃣ منابع Open Access\n\n"
             "🔹 **منابع جستجو:**\n"
             "• Crossref (اطلاعات کامل)\n"
             "• Unpaywall (PDF قانونی)\n"
@@ -351,7 +339,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ======================================================
 
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """اضافه کردن کانال جدید به لیست جستجو"""
     if not context.args:
         await update.message.reply_text(
             "❌ لطفاً نام کانال را وارد کنید.\n"
@@ -376,7 +363,6 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """حذف کانال از لیست جستجو"""
     if not context.args:
         await update.message.reply_text(
             "❌ لطفاً نام کانال را وارد کنید.\n"
@@ -400,7 +386,6 @@ async def remove_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """نمایش لیست کانال‌های جستجو"""
     if not SEARCH_CHANNELS:
         await update.message.reply_text("📭 لیست کانال‌ها خالی است.")
         return
@@ -416,7 +401,6 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ======================================================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """پردازش اصلی پیام‌های کاربر"""
     # ============================================================
     # 1. اعتبارسنجی ورودی
     # ============================================================
@@ -465,22 +449,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     update_cache_stats(False)
     
     # ============================================================
-    # 5. جستجو
+    # 5. جستجو در کانال‌های تلگرام (اولویت اول)
     # ============================================================
     await update.message.reply_text(
-        "🔎 **در حال جستجو در منابع Open Access...**\n"
-        "⏳ این عمل ممکن است ۱۰-۲۰ ثانیه طول بکشد.\n\n"
-        "📚 منابع جستجو:\n"
-        "• Crossref (اطلاعات کامل)\n"
-        "• Unpaywall (PDF قانونی)\n"
-        "• Sci-Hub (PDF جایگزین)\n"
-        "• و ۷ منبع دیگر",
+        "🔍 **در حال جستجو در کانال‌های تلگرام...**\n"
+        f"📋 کانال‌ها: {', '.join([f'@{ch}' for ch in SEARCH_CHANNELS])}",
         parse_mode="Markdown"
     )
     
-    # دریافت اطلاعات کامل مقاله
     try:
-        result = await asyncio.to_thread(search_open_access, query)
+        channel_result = await search_in_channels(query, context.bot, context)
+        if channel_result:
+            print(f"✅ Found in Telegram channels")
+            CACHE_STATS["channel_hits"] += 1
+            
+            # اگر file_id موجود باشد، مستقیماً ارسال کن
+            if channel_result.get("file_id"):
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=channel_result["file_id"],
+                    caption=f"📄 از کانال @{channel_result.get('channel', 'unknown')} ارسال شد\n\n📌 {channel_result.get('title', 'Unknown')}"
+                )
+                # ذخیره در کش
+                save_paper(
+                    query=query,
+                    title=channel_result.get("title", "Unknown"),
+                    file_id=channel_result["file_id"],
+                    source="channel"
+                )
+                TEMP_CACHE[query] = {
+                    "title": channel_result.get("title", "Unknown"),
+                    "file_id": channel_result["file_id"]
+                }
+                return
+            
+            # اگر file_id نبود اما pdf_url داشت، دانلود کن
+            if channel_result.get("pdf_url"):
+                # ادامه با دانلود PDF
+                result = channel_result
+            else:
+                await update.message.reply_text("❌ مقاله در کانال پیدا شد اما قابل دانلود نیست.")
+                return
+        else:
+            # ============================================================
+            # 6. جستجو در منابع Open Access (اگر در کانال پیدا نشد)
+            # ============================================================
+            await update.message.reply_text(
+                "🔎 **جستجو در منابع Open Access...**\n"
+                "⏳ این عمل ممکن است ۱۰-۲۰ ثانیه طول بکشد.\n\n"
+                "📚 منابع جستجو:\n"
+                "• Crossref (اطلاعات کامل)\n"
+                "• Unpaywall (PDF قانونی)\n"
+                "• Sci-Hub (PDF جایگزین)\n"
+                "• و ۷ منبع دیگر",
+                parse_mode="Markdown"
+            )
+            
+            result = await asyncio.to_thread(search_open_access, query)
+            
     except Exception as e:
         print(f"❌ Search error: {e}")
         result = None
@@ -500,7 +526,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     try:
         # ============================================================
-        # 6. دانلود PDF
+        # 7. دانلود PDF
         # ============================================================
         await update.message.reply_text("📥 **در حال دانلود PDF...**")
         
@@ -514,7 +540,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         
         # ============================================================
-        # 7. ساخت کپشن کامل
+        # 8. ساخت کپشن کامل
         # ============================================================
         title = result.get("title", "Unknown Title")
         authors = result.get("authors", "Unknown Authors")
@@ -544,13 +570,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         channel_caption = f"{title}\n\n{hashtag}\n{doi} (https://doi.org/{doi})"
         
         # ============================================================
-        # 8. دریافت نام اصلی فایل
+        # 9. دریافت نام اصلی فایل
         # ============================================================
         original_filename = get_filename_from_metadata(result, result.get("pdf_url", ""))
         print(f"📄 Original filename: {original_filename}")
         
         # ============================================================
-        # 9. ذخیره در کانال با نام اصلی
+        # 10. ذخیره در کانال با نام اصلی
         # ============================================================
         await update.message.reply_text("📤 **در حال ذخیره در کانال...**")
         
@@ -569,7 +595,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 print(f"✅ Uploaded to channel: {original_filename}")
             except Exception as e:
                 print(f"❌ Channel upload error: {e}")
-                # در صورت خطا، بدون نام خاص ارسال کن
                 channel_msg = await context.bot.send_document(
                     chat_id=CHANNEL_ID,
                     document=open(temp_path, 'rb'),
@@ -581,14 +606,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         file_id = channel_msg.document.file_id
         
         # ============================================================
-        # 10. ذخیره در کش
+        # 11. ذخیره در کش
         # ============================================================
         save_paper(query=query, title=title, file_id=file_id, source=result.get("source", "unknown"))
         TEMP_CACHE[query] = {"title": title, "file_id": file_id}
         CACHE_STATS["successful_downloads"] += 1
         
         # ============================================================
-        # 11. ارسال به کاربر با نام اصلی
+        # 12. ارسال به کاربر با نام اصلی
         # ============================================================
         try:
             await context.bot.send_document(
@@ -602,7 +627,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             print(f"✅ Sent to user: {original_filename}")
         except Exception as e:
             print(f"❌ User send error: {e}")
-            # در صورت خطا، بدون نام خاص ارسال کن
             await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=file_id,
@@ -624,12 +648,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ======================================================
 
 def main() -> None:
-    """تابع اصلی راه‌اندازی ربات"""
     print("=" * 50)
     print("🤖 **PaperBot Starting...**")
     print(f"📚 Search channels: {SEARCH_CHANNELS}")
     print(f"🏢 Publisher map: {len(PUBLISHER_MAP)} publishers")
     print(f"📄 Filename: Preserving original PDF names")
+    print(f"📋 Search order: Cache → Telegram Channels → Open Access Sources")
     print("=" * 50)
     
     app = Application.builder().token(BOT_TOKEN).build()
