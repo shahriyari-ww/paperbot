@@ -72,6 +72,7 @@ def search_scihub(query: str):
                     src = iframe.get('src', '')
                     if src and 'pdf' in src.lower():
                         pdf_url = src
+                        print(f"🔍 Found PDF in iframe: {pdf_url}")
                         break
                 
                 # روش 2: پیدا کردن لینک دانلود
@@ -80,8 +81,9 @@ def search_scihub(query: str):
                         href = link.get('href', '')
                         text = link.text.lower()
                         # جستجو در متن و href
-                        if 'pdf' in href.lower() or 'pdf' in text or 'دانلود' in text:
+                        if 'pdf' in href.lower() or 'pdf' in text or 'دانلود' in text or 'download' in text:
                             pdf_url = href
+                            print(f"🔍 Found PDF in link: {pdf_url}")
                             break
                 
                 # روش 3: جستجوی الگوی PDF در کل صفحه
@@ -90,6 +92,7 @@ def search_scihub(query: str):
                     match = pdf_pattern.search(resp.text)
                     if match:
                         pdf_url = match.group(1)
+                        print(f"🔍 Found PDF in pattern: {pdf_url}")
                 
                 # روش 4: جستجوی الگوی PDF در اسکریپت‌ها
                 if not pdf_url:
@@ -97,6 +100,7 @@ def search_scihub(query: str):
                     match = script_pattern.search(resp.text)
                     if match:
                         pdf_url = match.group(1)
+                        print(f"🔍 Found PDF in script: {pdf_url}")
                 
                 # روش 5: جستجوی دکمه دانلود
                 if not pdf_url:
@@ -107,7 +111,18 @@ def search_scihub(query: str):
                             parent = button.find_parent('a')
                             if parent and parent.get('href'):
                                 pdf_url = parent.get('href')
+                                print(f"🔍 Found PDF in button: {pdf_url}")
                                 break
+                
+                # روش 6: بررسی متا تگ‌ها
+                if not pdf_url:
+                    meta_refresh = soup.find('meta', attrs={'http-equiv': 'refresh'})
+                    if meta_refresh:
+                        content = meta_refresh.get('content', '')
+                        url_match = re.search(r'url=([^;]+)', content, re.IGNORECASE)
+                        if url_match:
+                            pdf_url = url_match.group(1)
+                            print(f"🔍 Found PDF in meta refresh: {pdf_url}")
                 
                 # اگر لینک پیدا شد، آن را کامل کن
                 if pdf_url:
@@ -122,16 +137,21 @@ def search_scihub(query: str):
                     # تست لینک PDF پیدا شده
                     try:
                         test_resp = requests.get(pdf_url, headers=headers, timeout=10, stream=True)
-                        if test_resp.status_code == 200 and 'application/pdf' in test_resp.headers.get('content-type', '').lower():
-                            return {
-                                "title": f"Article from Sci-Hub ({query})",
-                                "pdf_url": pdf_url,
-                                "source": "scihub"
-                            }
+                        if test_resp.status_code == 200:
+                            test_content_type = test_resp.headers.get('content-type', '').lower()
+                            if 'application/pdf' in test_content_type or pdf_url.endswith('.pdf'):
+                                print(f"✅ PDF link verified: {pdf_url}")
+                                return {
+                                    "title": f"Article from Sci-Hub ({query})",
+                                    "pdf_url": pdf_url,
+                                    "source": "scihub"
+                                }
+                            else:
+                                print(f"⚠️ PDF link test failed: not PDF (content-type: {test_content_type})")
                         else:
                             print(f"⚠️ PDF link test failed: {test_resp.status_code}")
-                    except:
-                        print(f"⚠️ PDF link test error, trying next mirror")
+                    except Exception as e:
+                        print(f"⚠️ PDF link test error: {e}")
                         continue
                 
                 print(f"⚠️ No PDF link found in {mirror}, trying next mirror...")
