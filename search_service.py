@@ -1,6 +1,4 @@
 # search_service.py
-import asyncio
-from typing import Optional, Dict, Any
 from providers.arxiv_provider import search_arxiv
 from providers.pubmed_provider import search_pubmed, search_pubmed_advanced
 from providers.crossref_provider import search_crossref
@@ -10,27 +8,15 @@ from providers.core_provider import search_core
 from providers.base_provider import search_base
 from providers.doaj_provider import search_doaj
 from providers.scihub_provider import search_scihub
-from channel_search import search_in_channels  # ← این تابع را ایجاد کنید
+from providers.openalex_provider import search_openalex
+from typing import Optional, Dict, Any, List
 
-def search_open_access(query: str, bot=None, context=None) -> Optional[Dict[str, Any]]:
+def search_open_access(query: str, max_results: int = 5) -> Optional[List[Dict[str, Any]]]:
     """
-    جستجو در منابع مختلف Open Access با اولویت کانال‌های تلگرام
-    
-    اولویت:
-    1. کش (Supabase)
-    2. کانال‌های تلگرام
-    3. منابع خارجی (Crossref, Sci-Hub, ...)
+    جستجو در منابع مختلف Open Access با قابلیت بازگرداندن چندین نتیجه
     """
-    # 1. جستجو در کانال‌های تلگرام (اگر bot و context موجود باشد)
-    if bot and context:
-        print(f"🔍 Searching in Telegram channels for: {query}")
-        channel_result = asyncio.run(search_in_channels(query, bot, context))
-        if channel_result:
-            print(f"✅ Found in Telegram channels")
-            return channel_result
-    
-    # 2. جستجو در منابع خارجی
     providers = [
+        ("OpenAlex", search_openalex),      # منبع جدید
         ("Crossref", search_crossref),
         ("Unpaywall", search_unpaywall),
         ("Sci-Hub", search_scihub),
@@ -49,10 +35,19 @@ def search_open_access(query: str, bot=None, context=None) -> Optional[Dict[str,
             result = search_func(query)
             if result:
                 print(f"✅ Found in {provider_name}")
-                return result
+                return [result] if not isinstance(result, list) else result
         except Exception as e:
             print(f"⚠️ Error in {provider_name}: {e}")
             continue
     
     print(f"❌ No results found for: {query}")
+    return None
+
+def search_open_access_single(query: str) -> Optional[Dict[str, Any]]:
+    """
+    جستجو و بازگرداندن اولین نتیجه (برای سازگاری با کد قبلی)
+    """
+    results = search_open_access(query, max_results=1)
+    if results and len(results) > 0:
+        return results[0]
     return None
