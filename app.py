@@ -98,10 +98,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        # دانلود PDF
-        pdf_resp = requests.get(result["pdf_url"], timeout=60)
+        # دانلود PDF با هدرهای مناسب
+        await update.message.reply_text("📥 در حال دانلود PDF...")
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept": "application/pdf, text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Connection": "keep-alive",
+        }
+        
+        pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
+        
+        # بررسی وضعیت دانلود
         if pdf_resp.status_code != 200:
-            await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
+            await update.message.reply_text(f"❌ دانلود PDF ناموفق بود. (کد: {pdf_resp.status_code})")
+            return
+        
+        # بررسی اینکه آیا محتوا واقعاً PDF است
+        content_type = pdf_resp.headers.get('content-type', '').lower()
+        content_length = len(pdf_resp.content)
+        
+        # اگر محتوا HTML بود، تلاش مجدد برای پیدا کردن PDF
+        if 'text/html' in content_type or content_length < 50000:
+            await update.message.reply_text("🔄 تلاش مجدد برای دریافت PDF...")
+            
+            # تلاش با هدرهای مختلف
+            headers["Accept"] = "application/pdf"
+            pdf_resp = requests.get(result["pdf_url"], headers=headers, timeout=90, allow_redirects=True)
+            
+            if pdf_resp.status_code != 200:
+                await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
+                return
+            
+            # بررسی مجدد محتوا
+            content_type = pdf_resp.headers.get('content-type', '').lower()
+            content_length = len(pdf_resp.content)
+        
+        # اگر هنوز PDF نیست یا حجم فایل کم است
+        if 'application/pdf' not in content_type and not pdf_resp.url.endswith('.pdf'):
+            await update.message.reply_text(f"⚠️ فایل دانلود شده PDF نیست. (نوع: {content_type})")
+            # ادامه نمی‌دهیم
+            return
+        
+        if content_length < 50000:  # کمتر از 50 کیلوبایت
+            await update.message.reply_text("⚠️ فایل دانلود شده بسیار کوچک است. احتمالاً مقاله در دسترس نیست.")
             return
         
         # ساخت کپشن با هشتگ ناشر
@@ -123,20 +164,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = f"{title}\n\n{doi} (https://doi.org/{doi})"
         
         # ذخیره در کانال و کش
-        with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+        await update.message.reply_text("📤 در حال ذخیره در کانال...")
+        
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             f.write(pdf_resp.content)
             f.flush()
+            temp_path = f.name
             
             channel_msg = await context.bot.send_document(
                 chat_id=CHANNEL_ID,
-                document=f.name,
+                document=open(temp_path, 'rb'),
                 caption=caption
             )
             file_id = channel_msg.document.file_id
+            
+            # پاک کردن فایل موقت
+            os.remove(temp_path)
         
         # ذخیره در Supabase و کش موقت
         save_paper(query=query, title=title, file_id=file_id, source=result["source"])
-        TEMP_CACHE[query] = {"title": title, "file_id": file_id}  # کش موقت
+        TEMP_CACHE[query] = {"title": title, "file_id": file_id}
         
         # ارسال به کاربر
         await context.bot.send_document(
@@ -145,6 +192,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=f"📄 {title}\n📚 منبع: {result['source']}"
         )
         
+    except requests.exceptions.Timeout:
+        await update.message.reply_text("⏰ زمان دانلود به پایان رسید. لطفاً دوباره تلاش کنید.")
+    except requests.exceptions.RequestException as e:
+        await update.message.reply_text(f"❌ خطا در دانلود: {str(e)}")
     except Exception as e:
         await update.message.reply_text(f"⚠️ خطا: {str(e)}")
 
