@@ -544,7 +544,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         
         # ============================================================
-        # 8. ساخت کپشن کامل
+        # 8. ساخت کپشن کامل (یکسان برای کاربر و کانال)
         # ============================================================
         title = result.get("title", "Unknown Title")
         authors = result.get("authors", "Unknown Authors")
@@ -552,7 +552,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         year = result.get("year", "Unknown Year")
         doi = query if query.startswith("10.") else result.get("doi", "")
         
-        # استخراج ناشر برای هشتگ
+        # استخراج ناشر برای هشتگ (اختیاری)
         publisher = "unknown"
         hashtag = ""
         if doi.startswith("10."):
@@ -563,6 +563,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except:
                 pass
         
+        # کپشن کامل برای کاربر و کانال (هر دو یکسان)
         full_caption = f"""📄 **{title}**
 
 📝 **Authors:** {authors}
@@ -571,7 +572,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 🔗 **DOI:** {doi} (https://doi.org/{doi})
 📎 **Source:** {result.get('source', 'unknown')}"""
         
-        channel_caption = f"{title}\n\n{hashtag}\n{doi} (https://doi.org/{doi})"
+        # کپشن کانال نیز همان full_caption است
+        channel_caption = full_caption
         
         # ============================================================
         # 9. دریافت نام اصلی فایل
