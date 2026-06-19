@@ -1,5 +1,6 @@
+# render.yaml
 services:
-  - type: worker 
+  - type: worker
     name: paperbot
     runtime: python
     buildCommand: pip install -r requirements.txt
@@ -13,3 +14,41 @@ services:
         sync: false
       - key: CHANNEL_ID
         sync: false
+      - key: PORT
+        value: 10000
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+
+  - type: cron
+    name: cleanup-cache
+    runtime: python
+    schedule: "0 0 * * *"  # هر روز نیمه شب
+    buildCommand: pip install -r requirements.txt
+    startCommand: python cleanup.py
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+    plan: free
+    region: oregon
+
+  - type: web
+    name: paperbot-webhook
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: CHANNEL_ID
+        sync: false
+      - key: PORT
+        value: 10000
+    plan: free
+    region: oregon
