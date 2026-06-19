@@ -5,20 +5,13 @@ from bs4 import BeautifulSoup
 
 def search_scihub(query: str):
     """
-    جستجو در Sci-Hub برای یافتن نسخه PDF واقعی مقاله
-    
-    Args:
-        query (str): DOI مقاله (شروع با 10.)
-        
-    Returns:
-        dict: اطلاعات مقاله با لینک PDF واقعی یا None در صورت عدم یافت
+    جستجو در Sci-Hub برای یافتن نسخه PDF واقعی مقاله با چندین روش استخراج
     """
     try:
         if not query.startswith("10."):
             print("❌ Not a DOI, skipping Sci-Hub")
             return None
             
-        # آینه‌های Sci-Hub (مرتب‌شده بر اساس سرعت)
         mirrors = [
             "https://sci-hub.se",
             "https://sci-hub.st",
@@ -40,14 +33,12 @@ def search_scihub(query: str):
                 url = f"{mirror}/{query}"
                 print(f"🔍 Trying mirror: {mirror}")
                 
-                # دریافت صفحه HTML
                 resp = requests.get(url, headers=headers, timeout=30)
                 
                 if resp.status_code != 200:
                     print(f"❌ Mirror {mirror} returned status: {resp.status_code}")
                     continue
                 
-                # بررسی محتوا
                 content_type = resp.headers.get('content-type', '').lower()
                 
                 # اگر مستقیماً PDF بود
@@ -59,82 +50,36 @@ def search_scihub(query: str):
                         "source": "scihub"
                     }
                 
-                # اگر HTML بود، لینک PDF را استخراج کن
+                # استخراج لینک PDF از HTML
                 soup = BeautifulSoup(resp.text, 'html.parser')
-                
-                # ============================================================
-                # روش‌های مختلف استخراج لینک PDF
-                # ============================================================
                 pdf_url = None
                 
-                # روش 1: پیدا کردن iframe یا embed
-                for iframe in soup.find_all(['iframe', 'embed']):
-                    src = iframe.get('src', '')
-                    if src and 'pdf' in src.lower():
-                        pdf_url = src
-                        print(f"🔍 Found PDF in iframe: {pdf_url}")
-                        break
+                # روش‌های مختلف استخراج
+                extraction_methods = [
+                    ("iframe/embed", lambda: next((el.get('src') for el in soup.find_all(['iframe', 'embed']) if el.get('src') and 'pdf' in el.get('src').lower()), None)),
+                    ("links", lambda: next((a.get('href') for a in soup.find_all('a') if a.get('href') and ('pdf' in a.get('href').lower() or 'pdf' in a.text.lower())), None)),
+                    ("pattern", lambda: re.search(r'(https?://[^\s]+\.pdf)', resp.text).group(1) if re.search(r'(https?://[^\s]+\.pdf)', resp.text) else None),
+                    ("script", lambda: re.search(r'location\.href\s*=\s*["\']([^"\']+\.pdf)["\']', resp.text).group(1) if re.search(r'location\.href\s*=\s*["\']([^"\']+\.pdf)["\']', resp.text) else None),
+                    ("meta_refresh", lambda: re.search(r'url=([^;]+)', soup.find('meta', attrs={'http-equiv': 'refresh'}).get('content', '')).group(1) if soup.find('meta', attrs={'http-equiv': 'refresh'}) and re.search(r'url=([^;]+)', soup.find('meta', attrs={'http-equiv': 'refresh'}).get('content', '')) else None),
+                ]
                 
-                # روش 2: پیدا کردن لینک دانلود
-                if not pdf_url:
-                    for link in soup.find_all('a'):
-                        href = link.get('href', '')
-                        text = link.text.lower()
-                        # جستجو در متن و href
-                        if 'pdf' in href.lower() or 'pdf' in text or 'دانلود' in text or 'download' in text:
-                            pdf_url = href
-                            print(f"🔍 Found PDF in link: {pdf_url}")
+                for method_name, method_func in extraction_methods:
+                    try:
+                        result = method_func()
+                        if result:
+                            pdf_url = result
+                            print(f"🔍 Found PDF using {method_name}: {pdf_url}")
                             break
+                    except:
+                        continue
                 
-                # روش 3: جستجوی الگوی PDF در کل صفحه
-                if not pdf_url:
-                    pdf_pattern = re.compile(r'(https?://[^\s]+\.pdf)', re.IGNORECASE)
-                    match = pdf_pattern.search(resp.text)
-                    if match:
-                        pdf_url = match.group(1)
-                        print(f"🔍 Found PDF in pattern: {pdf_url}")
-                
-                # روش 4: جستجوی الگوی PDF در اسکریپت‌ها
-                if not pdf_url:
-                    script_pattern = re.compile(r'location\.href\s*=\s*["\']([^"\']+\.pdf)["\']', re.IGNORECASE)
-                    match = script_pattern.search(resp.text)
-                    if match:
-                        pdf_url = match.group(1)
-                        print(f"🔍 Found PDF in script: {pdf_url}")
-                
-                # روش 5: جستجوی دکمه دانلود
-                if not pdf_url:
-                    for button in soup.find_all(['button', 'div', 'span']):
-                        text = button.text.lower()
-                        if 'pdf' in text or 'دانلود' in text or 'download' in text:
-                            # بررسی لینک اطراف
-                            parent = button.find_parent('a')
-                            if parent and parent.get('href'):
-                                pdf_url = parent.get('href')
-                                print(f"🔍 Found PDF in button: {pdf_url}")
-                                break
-                
-                # روش 6: بررسی متا تگ‌ها
-                if not pdf_url:
-                    meta_refresh = soup.find('meta', attrs={'http-equiv': 'refresh'})
-                    if meta_refresh:
-                        content = meta_refresh.get('content', '')
-                        url_match = re.search(r'url=([^;]+)', content, re.IGNORECASE)
-                        if url_match:
-                            pdf_url = url_match.group(1)
-                            print(f"🔍 Found PDF in meta refresh: {pdf_url}")
-                
-                # اگر لینک پیدا شد، آن را کامل کن
                 if pdf_url:
-                    # اگر لینک نسبی بود، کاملش کن
                     if pdf_url.startswith('/'):
                         pdf_url = f"{mirror}{pdf_url}"
                     elif not pdf_url.startswith('http'):
                         pdf_url = f"{mirror}/{pdf_url}"
                     
-                    print(f"✅ Found PDF link: {pdf_url}")
-                    
-                    # تست لینک PDF پیدا شده
+                    # تست لینک
                     try:
                         test_resp = requests.get(pdf_url, headers=headers, timeout=10, stream=True)
                         if test_resp.status_code == 200:
@@ -146,21 +91,13 @@ def search_scihub(query: str):
                                     "pdf_url": pdf_url,
                                     "source": "scihub"
                                 }
-                            else:
-                                print(f"⚠️ PDF link test failed: not PDF (content-type: {test_content_type})")
-                        else:
-                            print(f"⚠️ PDF link test failed: {test_resp.status_code}")
-                    except Exception as e:
-                        print(f"⚠️ PDF link test error: {e}")
-                        continue
+                    except:
+                        pass
                 
-                print(f"⚠️ No PDF link found in {mirror}, trying next mirror...")
+                print(f"⚠️ No valid PDF link found in {mirror}")
                 
-            except requests.exceptions.RequestException as e:
-                print(f"⚠️ Error with {mirror}: {e}")
-                continue
             except Exception as e:
-                print(f"⚠️ Unexpected error with {mirror}: {e}")
+                print(f"⚠️ Error with {mirror}: {e}")
                 continue
         
         print("❌ No working Sci-Hub mirror found")
