@@ -5,41 +5,30 @@ import os
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))  # کانال خصوصی برای ذخیره فایل‌ها
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 PORT = os.getenv("PORT", "10000")
 
 # ---------- لیست کانال‌های عمومی برای جستجو ----------
-# ربات برای پیدا کردن مقاله، این کانال‌ها رو بررسی می‌کنه
 SEARCH_CHANNELS = [
     "nexus_aaron",
     "scihubot",
     "sks7777777nexusbot",
-    # کانال‌های جدید رو اینجا اضافه کنید
 ]
 
 # ---------- شناسه عددی کانال‌ها (اختیاری) ----------
-# اگر شناسه عددی کانال‌ها رو دارید، اینجا وارد کنید
-# برای پیدا کردن شناسه عددی، از ربات @userinfobot استفاده کنید
 CHANNEL_IDS = {
-    "nexus_aaron": -1001234567890,  # عدد واقعی رو جایگزین کنید
+    "nexus_aaron": -1001234567890,
     "scihubot": -1001234567891,
 }
 
-# ---------- اطلاعات حساب کاربری برای telethon (برای جستجوی گروه) ----------
-# این مقادیر رو از سایت my.telegram.org دریافت کنید
-API_ID = int(os.getenv("API_ID", "0"))  # عددی مثل 123456
-API_HASH = os.getenv("API_HASH", "")    # رشته مثل "a1b2c3d4e5f6..."
-PHONE_NUMBER = os.getenv("PHONE_NUMBER", "")  # شماره تلفن با کد کشور، مثل "+989123456789"
+# ---------- Telethon غیرفعال شد ----------
+# API_ID = int(os.getenv("API_ID", "0"))
+# API_HASH = os.getenv("API_HASH", "")
+# PHONE_NUMBER = os.getenv("PHONE_NUMBER", "")
 
-# ---------- لیست گروه‌های مجاز برای جستجو (اختیاری) ----------
-ALLOWED_GROUPS = [
-    # "@group_username",
-    # -1001234567890,  # شناسه عددی گروه
-]
+# ---------- لیست گروه‌ها (غیرفعال) ----------
+ALLOWED_GROUPS = []
 
 # ---------- تنظیمات پیشرفته ----------
-# تعداد پیام‌های بررسی شده در هر کانال/گروه
 SEARCH_LIMIT = 100
-
-# زمان تاخیر بین درخواست‌ها (برای جلوگیری از محدودیت)
-REQUEST_DELAY = 1.5  # ثانیه
+REQUEST_DELAY = 1.5
