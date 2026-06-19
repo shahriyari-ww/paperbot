@@ -2,8 +2,9 @@
 import requests
 import re
 from bs4 import BeautifulSoup
+from typing import Optional, Dict, Any
 
-def search_scihub(query: str):
+def search_scihub(query: str) -> Optional[Dict[str, Any]]:
     """
     جستجو در Sci-Hub برای یافتن نسخه PDF واقعی مقاله با چندین روش استخراج
     """
@@ -12,11 +13,15 @@ def search_scihub(query: str):
             print("❌ Not a DOI, skipping Sci-Hub")
             return None
             
+        # آینه‌های Sci-Hub (مرتب‌شده بر اساس سرعت)
         mirrors = [
             "https://sci-hub.se",
             "https://sci-hub.st",
             "https://sci-hub.ru",
-            "https://sci-hub.ee"
+            "https://sci-hub.ee",
+            "https://sci-hub.wf",
+            "https://sci-hub.shop",
+            "https://sci-hub.yt",
         ]
         
         print(f"📡 Searching Sci-Hub for: {query}")
