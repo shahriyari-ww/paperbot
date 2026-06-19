@@ -9,14 +9,22 @@ from providers.base_provider import search_base
 from providers.doaj_provider import search_doaj
 from providers.scihub_provider import search_scihub
 from providers.openalex_provider import search_openalex
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
-def search_open_access(query: str, max_results: int = 5) -> Optional[List[Dict[str, Any]]]:
+def search_open_access(query: str, max_results: int = 5) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
     """
-    جستجو در منابع مختلف Open Access با قابلیت بازگرداندن چندین نتیجه
+    جستجو در منابع مختلف Open Access
+    
+    Args:
+        query (str): عنوان مقاله یا DOI
+        max_results (int): حداکثر تعداد نتایج
+        
+    Returns:
+        dict or list: اطلاعات مقاله یا لیست مقالات
     """
+    # لیست ارائه‌دهندگان با ترتیب اولویت
     providers = [
-        ("OpenAlex", search_openalex),      # منبع جدید
+        ("OpenAlex", search_openalex),
         ("Crossref", search_crossref),
         ("Unpaywall", search_unpaywall),
         ("Sci-Hub", search_scihub),
@@ -35,7 +43,11 @@ def search_open_access(query: str, max_results: int = 5) -> Optional[List[Dict[s
             result = search_func(query)
             if result:
                 print(f"✅ Found in {provider_name}")
-                return [result] if not isinstance(result, list) else result
+                # اگر result یک لیست است، همان را برگردان
+                if isinstance(result, list):
+                    return result
+                # اگر result یک دیکشنری است، به صورت لیست برگردان
+                return [result]
         except Exception as e:
             print(f"⚠️ Error in {provider_name}: {e}")
             continue
@@ -48,6 +60,9 @@ def search_open_access_single(query: str) -> Optional[Dict[str, Any]]:
     جستجو و بازگرداندن اولین نتیجه (برای سازگاری با کد قبلی)
     """
     results = search_open_access(query, max_results=1)
-    if results and len(results) > 0:
-        return results[0]
+    if results:
+        if isinstance(results, list) and len(results) > 0:
+            return results[0]
+        elif isinstance(results, dict):
+            return results
     return None
