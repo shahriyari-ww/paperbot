@@ -4,7 +4,7 @@ import tempfile
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS
+from config import BOT_TOKEN, CHANNEL_ID, SEARCH_CHANNELS, PUBLISHER_MAP
 from db import get_cached, save_paper
 from search_service import search_open_access
 from channel_search import search_in_channels
@@ -108,34 +108,61 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        # دانلود و ارسال (کد قبلی)
+        # 4. دانلود PDF
         pdf_resp = requests.get(result["pdf_url"], timeout=60)
         if pdf_resp.status_code != 200:
             await update.message.reply_text("❌ دانلود PDF ناموفق بود.")
             return
         
+        # 5. ساخت کپشن هوشمند با هشتگ ناشر
+        title = result["title"]
+        doi = query if query.startswith("10.") else result.get("doi", "")
+        
+        # استخراج ناشر از DOI
+        publisher = "unknown"
+        hashtag = ""
+        if doi.startswith("10."):
+            try:
+                # مثال: 10.1016/j.seta.2026.104989 -> 1016
+                publisher_part = doi.split("/")[0].replace("10.", "")
+                # استفاده از دیکشنری نگاشت
+                publisher = PUBLISHER_MAP.get(publisher_part, publisher_part)
+                hashtag = f"#pub_{publisher}"
+            except:
+                pass
+        
+        # ساخت کپشن نهایی
+        if hashtag:
+            caption = f"{title}\n\n{hashtag}\n{doi} (https://doi.org/{doi})"
+        else:
+            caption = f"{title}\n\n{doi} (https://doi.org/{doi})"
+        
+        # 6. ذخیره فایل موقت
         with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
             f.write(pdf_resp.content)
             f.flush()
             
+            # 7. آپلود به کانال خصوصی با کپشن جدید
             channel_msg = await context.bot.send_document(
                 chat_id=CHANNEL_ID,
                 document=f.name,
-                caption=result["title"]
+                caption=caption
             )
             file_id = channel_msg.document.file_id
         
+        # 8. ذخیره در Supabase
         save_paper(
             query=query,
-            title=result["title"],
+            title=title,
             file_id=file_id,
             source=result["source"]
         )
         
+        # 9. ارسال به کاربر
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=file_id,
-            caption=f"📄 {result['title']}\n📚 منبع: {result['source']}"
+            caption=f"📄 {title}\n📚 منبع: {result['source']}"
         )
         
     except Exception as e:
