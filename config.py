@@ -10,6 +10,7 @@ PORT = os.getenv("PORT", "10000")
 
 # ---------- لیست کانال‌های عمومی برای جستجو ----------
 SEARCH_CHANNELS = [
+    "Archive_article",
     "nexus_aaron",
     "scihubot",
     "sks7777777nexusbot",
@@ -18,6 +19,7 @@ SEARCH_CHANNELS = [
 
 # ---------- شناسه عددی کانال‌ها (اختیاری) ----------
 CHANNEL_IDS = {
+    "Archive_article": -1001234567892
     "nexus_aaron": -1001234567890,  # عدد واقعی رو جایگزین کنید
     "scihubot": -1001234567891,
 }
