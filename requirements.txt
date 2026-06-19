@@ -1,0 +1,5 @@
+python-telegram-bot[webhooks]==22.0
+supabase
+requests
+aiohttp
+gunicorn
