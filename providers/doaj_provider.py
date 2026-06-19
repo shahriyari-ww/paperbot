@@ -1,18 +1,23 @@
 # providers/doaj_provider.py
 import requests
+from typing import Optional, Dict, Any
 
-def search_doaj(query: str):
+def search_doaj(query: str) -> Optional[Dict[str, Any]]:
     """
     جستجو در DOAJ (Directory of Open Access Journals)
     
     Args:
-        query (str): عنوان مقاله
+        query (str): عنوان مقاله یا DOI
         
     Returns:
         dict: اطلاعات مقاله یا None در صورت عدم یافت
     """
     try:
-        # جستجو در DOAJ
+        # DOAJ معمولاً با DOI کار نمی‌کند
+        if query.startswith("10."):
+            print("❌ DOAJ doesn't support DOI directly, skipping...")
+            return None
+            
         url = f"https://doaj.org/api/v2/search/articles/{query}?pageSize=1"
         
         print(f"📡 Sending request to DOAJ API...")
