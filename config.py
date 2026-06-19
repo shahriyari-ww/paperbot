@@ -24,9 +24,9 @@ SEARCH_CHANNELS = [
 
 # شناسه عددی کانال‌ها
 CHANNEL_IDS = {
-    "Archive_article": -1001234567892,
-    "nexus_aaron": -1001234567890,
-    "scihubot": -1001234567891,
+    "Archive_article": 0,
+    "nexus_aaron": 0,
+    "scihubot":0,
 }
 
 # دیکشنری نگاشت ناشران
